@@ -1,34 +1,43 @@
 from nonebot import on_command
 from nonebot.rule import to_me
-from nonebot.adapters import Message
+from nonebot.adapters import Message, MessageSegment
 from nonebot.params import CommandArg
-import httpx
-import math
-import json
+from src.tools.data_cache import song_cache,alias_cache
 
 base_url_lx = "https://maimai.lxns.net/api/v0/maimai/song/"
 
 get_song_info = on_command("info", rule=to_me(), aliases={"maiinfo"}, priority=5, block=True)
 
-def calculate_score_sss(diff:int) -> int:
-    return math.floor(diff*1.0000*21.6)
-
-def calculate_score_sssplus(diff:int) -> int:
-    return math.floor(diff*1.0050*22.4)
-
 @get_song_info.handle()
-async def handle_first_receive(arg: Message = CommandArg()):
-    if song_id := arg.extract_plain_text():
-        response_raw = httpx.get(f"{base_url_lx}{song_id}").text
-        response = json.loads(response_raw)
-        if response["difficulties"]["dx"] != []:
-            highest_difficulty = response["difficulties"]["dx"][-1]["level_value"]
-        else:
-            highest_difficulty = response["difficulties"]["standard"][-1]["level_value"]
-        # highest_difficulty = response["difficulties"][0]["level_value"]
-        rank_sss_score = calculate_score_sss(highest_difficulty)
-        rank_sssplus_score = calculate_score_sssplus(highest_difficulty)
+async def song_info(arg: Message = CommandArg()):
+    user_input = arg.extract_plain_text().strip()
 
-        await get_song_info.finish(f"曲名：{response['title']}\n分类：{response['genre']}\n难度：{highest_difficulty}\nsss分数：{rank_sss_score}\nsss+分数：{rank_sssplus_score}")
+    if(user_input.isdigit() and song_cache[int(user_input)]):
+        song = song_cache[int(user_input)]
+    elif(user_input in alias_cache):
+        song_id = alias_cache[user_input]
+        song = song_cache[song_id]
     else:
-        await get_song_info.finish("正确用法：/info [歌曲ID]，例如：/info 12345")
+        await get_song_info.finish("梦梦找不到这首歌哦...看看名字有没有问题喵？")
+        return
+    
+    level_names = {0:"绿",1:"黄",2:"红",3:"紫",4:"白"}
+    chart_str = ""
+
+    for chart in song.charts:
+        diff_name = level_names[chart.level]
+        chart_str += f"{diff_name}谱定数:{chart.difficulty} [{chart.type}]"
+        if diff_name == "白":
+            chart_str += f" sss得分:{chart.calculate_score_sss}，sss+得分:{chart.calculate_score_sssp}"
+        elif diff_name == "紫":
+            chart_str += f" sss得分:{chart.calculate_score_sss}，sss+得分:{chart.calculate_score_sssp}"
+        chart_str += "\n"
+    
+    img_str = f"https://assets2.lxns.net/maimai/jacket/{song.id}.png"
+    song_info_str = f'''{img_str}
+曲名:{song.title}
+分类:{song.genre}
+{chart_str}
+----------------Info From LXnet---------------'''
+    
+    await get_song_info.finish(song_info_str)

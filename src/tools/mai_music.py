@@ -17,8 +17,6 @@ class Chart:
     @property
     def calculate_score_sssp(self) -> int:
         return math.floor(self.difficulty * 1.0050 * 22.4)
-    sssscore: int = 0   #鸟的分
-    ssspscore: int = 0  #鸟加的分
 
 
 @dataclass
