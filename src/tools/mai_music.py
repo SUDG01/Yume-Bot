@@ -35,7 +35,7 @@ async def music_list():
     
     url = "https://maimai.lxns.net/api/v0/maimai/song/list"
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.get(url)
         if response.status_code == 200:
             resp_data = response.json()["songs"]

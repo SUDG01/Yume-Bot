@@ -7,7 +7,7 @@ async def alias_dict():
     alias_lx_url = "https://maimai.lxns.net/api/v0/maimai/alias/list"
     aliases_dict = {}
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.get(alias_lx_url)
         if response.status_code == 200:
             resp_data = response.json()["aliases"]

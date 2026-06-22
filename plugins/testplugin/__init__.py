@@ -14,7 +14,7 @@ key_gd="fd1e50f662bcdaedc15ecb1a09bbd0fe"
 #此处为事件处理函数示例，如示例所示，事件处理函数必须为异步函数，且必须使用装饰器 @响应器.handle() 来注册
 async def handle_func(args: Message = CommandArg()):
     if location:= args.extract_plain_text():
-        response = httpx.get(f"{weather_api}key={key_gd}&city={location}").text
+        response = httpx.get(f"{weather_api}key={key_gd}&city={location}", trust_env=False).text
         data = json.loads(response)
         if data["status"] == "1":
             await get_weather.finish(f"喵~当前{location}的天气是{data['lives'][0]['weather']}，温度是{data['lives'][0]['temperature']}°C，报告时间为{data['lives'][0]['reporttime']}~")

@@ -1,6 +1,7 @@
 from nonebot import on_command
 from nonebot.rule import to_me
 from nonebot.adapters import Message, MessageSegment
+from nonebot.adapters.onebot.v11 import MessageSegment
 from nonebot.params import CommandArg
 from src.tools.data_cache import song_cache,alias_cache
 
@@ -34,10 +35,11 @@ async def song_info(arg: Message = CommandArg()):
         chart_str += "\n"
     
     img_str = f"https://assets2.lxns.net/maimai/jacket/{song.id}.png"
-    song_info_str = f'''{img_str}
+    song_info_str = f'''
 曲名:{song.title}
 分类:{song.genre}
 {chart_str}
-----------------Info From LXnet---------------'''
+---Info From LXnet---'''
     
-    await get_song_info.finish(song_info_str)
+    
+    await get_song_info.finish(MessageSegment.image(img_str)+song_info_str)
