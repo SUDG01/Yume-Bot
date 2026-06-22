@@ -1,11 +1,9 @@
 from nonebot import on_command
 from nonebot.rule import to_me
-from nonebot.adapters import Message, MessageSegment
+from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageSegment
 from nonebot.params import CommandArg
-from src.tools.data_cache import song_cache,alias_cache
-
-base_url_lx = "https://maimai.lxns.net/api/v0/maimai/song/"
+from src.tools.data_cache import song_cache, alias_cache
 
 get_song_info = on_command("info", rule=to_me(), aliases={"maiinfo"}, priority=5, block=True)
 
@@ -19,7 +17,7 @@ async def song_info(arg: Message = CommandArg()):
         song_id = alias_cache[user_input]
         song = song_cache[song_id]
     else:
-        await get_song_info.finish("梦梦找不到这首歌哦...看看名字有没有问题喵？")
+        await get_song_info.finish("喵？小Yume找不到这首歌... 看看歌名有没有打错？")
         return
     
     level_names = {0:"绿",1:"黄",2:"红",3:"紫",4:"白"}
@@ -39,7 +37,7 @@ async def song_info(arg: Message = CommandArg()):
 曲名:{song.title}
 分类:{song.genre}
 {chart_str}
----Info From LXnet---'''
+—— Info From LXNet ——'''
     
     
     await get_song_info.finish(MessageSegment.image(img_str)+song_info_str)
