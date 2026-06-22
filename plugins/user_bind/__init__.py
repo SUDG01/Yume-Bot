@@ -20,7 +20,7 @@ async def _init_bindings_db():
 # ── 命令注册 ────────────────────────────────
 LXNET_PLAYER_URL = "https://maimai.lxns.net/api/v0/user/maimai/player"
 
-bind_cmd = on_command("bind", rule=to_me(), priority=4, block=True)
+bind_cmd = on_command("bind", aliases={"绑定"},rule=to_me(), priority=4, block=True)
 
 
 @bind_cmd.handle()
