@@ -4,5 +4,5 @@ __pycache__
 mai-bot
 思路梳理.txt
 napcat-docker
-src/static/cover
+src/static/cover/*.png
 src/tools/bindings.db
