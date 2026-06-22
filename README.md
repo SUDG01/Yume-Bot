@@ -8,7 +8,7 @@
 |------|------|
 | `/info <歌名/ID>` | 查询歌曲信息（定数、谱面、SSS/SSS+ 分数线），支持别名 |
 | `/b50` | 生成你的 Best 50 成绩图片 |
-| `/今日舞萌` | 每日人品值 + 宜忌活动 + 随机推歌 |
+| `/今日舞萌` | 每日人品值 + 随机推歌 |
 | `/bind <密钥>` | 绑定 LXNet 个人 API Key |
 | `/bind clear` | 清除绑定 |
 | `/天气 <城市>` | 查询城市天气 |
@@ -64,7 +64,7 @@ python -m venv venv
 source venv/bin/activate
 
 # 安装依赖
-pip install nonebot2 nonebot-adapter-onebot httpx pillow
+pip install -r requirements.txt
 ```
 
 ### 2. 配置 `.env`
