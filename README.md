@@ -8,6 +8,7 @@
 |------|------|
 | `/info <歌名/ID>` | 查询歌曲信息（定数、谱面、SSS/SSS+ 分数线），支持别名 |
 | `/b50` | 生成你的 Best 50 成绩图片 |
+| `/推分 [目标/难度]` | 根据 B50 与 Selection 生成个性化推分计划 |
 | `/今日舞萌` | 每日人品值 + 随机推歌 |
 | `/bind <密钥>` | 绑定 LXNet 个人 API Key |
 | `/bind clear` | 清除绑定 |
@@ -36,13 +37,17 @@ YumeBot/
 │   ├── init_data_maimai/    # 启动时加载歌曲数据
 │   ├── user_bind/           # /bind
 │   ├── mai_best50/          # /b50
+│   ├── mai_recommend/       # /推分
 │   └── today_wm/            # /今日舞萌
 ├── src/
 │   ├── tools/
 │   │   ├── mai_music.py     # Song/Chart 数据模型 + LXNet API
 │   │   ├── get_music_alias.py
 │   │   ├── data_cache.py    # 歌曲/别名内存缓存
+│   │   ├── maimai_rating.py # Rating 公式与谱面定数查询
 │   │   ├── b50_image.py     # B50 图片生成器
+│   │   ├── push_recommend.py # 推分收益计算
+│   │   ├── push_image.py    # 推分计划图片生成器
 │   │   ├── database.py      # SQLite 用户绑定
 │   │   ├── qqhash.py        # QQ 哈希（每日稳定性）
 │   │   └── bindings.db      # 绑定数据库（自动生成）
@@ -103,11 +108,14 @@ python bot.py
 
 在 QQ 中向机器人发送 `/help` 查看所有指令。
 
-首次使用 `/b50` 前需要先绑定 LXNet API Key：
+首次使用 `/b50` 或 `/推分` 前需要先绑定 LXNet API Key：
 
 1. 前往 [maimai.lxns.net](https://maimai.lxns.net) 注册并登录
 2. 在「账号详情」生成个人 API 密钥
 3. 向 bot 发送 `/bind <你的密钥>`
+
+推分计划支持目标 Rating 和难度筛选，例如 `/推分 15000`、`/推分 14+`
+或 `/推分 15000 14+`。
 
 ## 接入更多用户
 

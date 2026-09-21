@@ -12,6 +12,7 @@ from typing import Mapping, Sequence
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from src.tools.data_cache import song_cache
+from src.tools.maimai_rating import chart_constant
 
 
 # ── Canvas and assets ────────────────────────────────────────────────
@@ -338,26 +339,6 @@ def _draw_header(
     canvas.alpha_composite(panel, (MARGIN_X, HEADER_Y))
 
 
-def _chart_constant(entry: Mapping[str, object]) -> float | None:
-    song_id = entry.get("id")
-    level_index = entry.get("level_index")
-    chart_type = entry.get("type")
-    if not isinstance(song_id, int) or not isinstance(level_index, int):
-        return None
-
-    song = song_cache.get(song_id)
-    if song is None:
-        return None
-
-    for chart in song.charts:
-        if chart.level == level_index and chart.type == chart_type:
-            return chart.difficulty
-    for chart in song.charts:
-        if chart.level == level_index:
-            return chart.difficulty
-    return None
-
-
 def _draw_card(
     canvas: Image.Image,
     entry: Mapping[str, object],
@@ -447,7 +428,7 @@ def _draw_card(
         rating = math.floor(float(entry.get("dx_rating", 0)))
     except (TypeError, ValueError):
         rating = 0
-    constant = _chart_constant(entry)
+    constant = chart_constant(entry)
     level = str(entry.get("level", "?"))
     constant_text = (
         f"{constant:.1f}  →  {rating}"
