@@ -47,6 +47,7 @@ YumeBot/
 │   │   ├── qqhash.py        # QQ 哈希（每日稳定性）
 │   │   └── bindings.db      # 绑定数据库（自动生成）
 │   └── static/
+│       ├── b50/             # B50 原创背景与缺省曲绘
 │       ├── cover/           # 曲绘封面
 │       └── ttf/msyb.ttf     # 字体
 ├── napcat-docker/
