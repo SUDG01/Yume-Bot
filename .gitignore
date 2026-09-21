@@ -5,4 +5,4 @@ mai-bot
 思路梳理.txt
 napcat-docker
 src/static/cover/*.png
-src/tools/bindings.db
+src/tools/bindings.db*

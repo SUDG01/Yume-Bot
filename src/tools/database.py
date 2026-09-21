@@ -1,12 +1,21 @@
-import sqlite3
 import asyncio
+import os
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
 DB_PATH = Path(__file__).parent / "bindings.db"
 
 
+def _ensure_private_db_file() -> None:
+    """Create the database with owner-only permissions, or fix an existing file."""
+    fd = os.open(DB_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+    os.close(fd)
+    DB_PATH.chmod(0o600)
+
+
 def _get_conn() -> sqlite3.Connection:
+    _ensure_private_db_file()
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
