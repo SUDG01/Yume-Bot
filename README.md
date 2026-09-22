@@ -7,8 +7,12 @@
 | 指令 | 说明 |
 |------|------|
 | `/info <歌名/ID>` | 查询歌曲信息（定数、谱面、SSS/SSS+ 分数线），支持别名 |
+| `/查歌 <关键词>` | 按曲名或别名模糊搜索歌曲 |
+| `/定数查歌 <定数/范围>` | 按定数、谱面类型和难度筛选谱面 |
+| `/随歌 [条件]` | 随机推荐符合难度、类型或分类条件的谱面 |
 | `/b50` | 生成你的 Best 50 成绩图片 |
 | `/推分 [目标/难度]` | 根据 B50 与 Selection 生成个性化推分计划 |
+| `/成绩趋势 [7/30/90]` | 生成 Rating、同步活跃度和最近成绩趋势图 |
 | `/今日舞萌` | 每日人品值 + 随机推歌 |
 | `/bind <密钥>` | 绑定 LXNet 个人 API Key |
 | `/bind clear` | 清除绑定 |
@@ -34,10 +38,12 @@ YumeBot/
 │   ├── help.py              # /help
 │   ├── testplugin/          # /天气
 │   ├── get_song_info/       # /info
+│   ├── song_search/         # /查歌、/定数查歌、/随歌
 │   ├── init_data_maimai/    # 启动时加载歌曲数据
 │   ├── user_bind/           # /bind
 │   ├── mai_best50/          # /b50
 │   ├── mai_recommend/       # /推分
+│   ├── mai_trend/           # /成绩趋势
 │   └── today_wm/            # /今日舞萌
 ├── src/
 │   ├── tools/
@@ -48,6 +54,9 @@ YumeBot/
 │   │   ├── b50_image.py     # B50 图片生成器
 │   │   ├── push_recommend.py # 推分收益计算
 │   │   ├── push_image.py    # 推分计划图片生成器
+│   │   ├── song_search.py   # 曲名、别名和谱面筛选
+│   │   ├── trend_data.py    # 趋势数据规范化
+│   │   ├── trend_image.py   # 趋势图生成器
 │   │   ├── database.py      # SQLite 用户绑定
 │   │   ├── qqhash.py        # QQ 哈希（每日稳定性）
 │   │   └── bindings.db      # 绑定数据库（自动生成）
@@ -116,6 +125,10 @@ python bot.py
 
 推分计划支持目标 Rating 和难度筛选，例如 `/推分 15000`、`/推分 14+`
 或 `/推分 15000 14+`。
+
+歌曲筛选示例：`/查歌 internet`、`/定数查歌 13.5 14.0 DX 紫`、
+`/随歌 紫 14+ POPS`。成绩趋势支持 `/成绩趋势 7`、`/成绩趋势 30` 和
+`/成绩趋势 90`。
 
 ## 接入更多用户
 

@@ -1,19 +1,22 @@
-import httpx
 import math
 from dataclasses import dataclass
-from typing import List
+
+import httpx
+
 
 @dataclass
 class Chart:
-    type: str           #曲目类型(标准或dx)
-    difficulty: float   #定数
-    level: int          #难度等级(紫白分类...)
-    desn: str           #铺师
+    type: str
+    difficulty: float
+    level: int
+    desn: str
+    display_level: str = ""
+    version: int | None = None
 
     @property
     def calculate_score_sss(self) -> int:
         return math.floor(self.difficulty * 1.0000 * 21.6)
-    
+
     @property
     def calculate_score_sssp(self) -> int:
         return math.floor(self.difficulty * 1.0050 * 22.4)
@@ -21,55 +24,94 @@ class Chart:
 
 @dataclass
 class Song:
-    id: int                #歌曲id
-    title: str              #歌曲名称
-    genre: str             #歌曲分类
-    charts: List[Chart]    #包含的谱面列表
+    id: int
+    title: str
+    genre: str
+    charts: list[Chart]
+    artist: str = ""
+    bpm: int | None = None
+    version: int | None = None
+    disabled: bool = False
 
 
-async def music_list():
-    '''
-        获取落雪的maimai曲目列表,并对其进行处理
-    '''
-    all_songs: List[Song] = []
-    
+def _parse_chart(chart_type: str, data: dict) -> Chart | None:
+    try:
+        return Chart(
+            type=chart_type,
+            difficulty=float(data["level_value"]),
+            level=int(data["difficulty"]),
+            desn=str(data.get("note_designer") or ""),
+            display_level=str(data.get("level") or ""),
+            version=(
+                int(data["version"])
+                if isinstance(data.get("version"), (int, float))
+                else None
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+async def music_list() -> list[Song]:
+    """Fetch and normalize the current LXNet maimai song catalog."""
     url = "https://maimai.lxns.net/api/v0/maimai/song/list"
-    
-    async with httpx.AsyncClient(trust_env=False) as client:
-        response = await client.get(url)
-        if response.status_code == 200:
-            resp_data = response.json()["songs"]
-            for data in resp_data:
-                current_song_charts = []
-                if data["difficulties"]["dx"]:
-                    for chart in data["difficulties"]["dx"]:
-                        current_song_charts.append(Chart(
-                            type="dx",
-                            difficulty=chart["level_value"],
-                            level=chart["difficulty"],
-                            desn=chart["note_designer"],
-                        ))
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=15.0) as client:
+            response = await client.get(url)
+    except httpx.RequestError:
+        return []
+    if response.status_code != 200:
+        return []
 
-                if data["difficulties"]["standard"]:
-                    for chart in data["difficulties"]["standard"]:
-                        current_song_charts.append(Chart(
-                            type="standard",
-                            difficulty=chart["level_value"],
-                            level=chart["difficulty"],
-                            desn=chart["note_designer"],
-                        ))
-                song = Song(
-                    id=data["id"],
-                    title=data["title"],
-                    genre=data["genre"],
-                    charts=current_song_charts
-                )
-                
-                all_songs.append(song)
+    try:
+        raw_songs = response.json()["songs"]
+    except (KeyError, TypeError, ValueError):
+        return []
 
-        else:
-            return
-            
-    return all_songs
+    songs: list[Song] = []
+    for data in raw_songs:
+        if not isinstance(data, dict):
+            continue
+        difficulties = data.get("difficulties")
+        if not isinstance(difficulties, dict):
+            continue
 
+        charts: list[Chart] = []
+        for chart_type in ("dx", "standard"):
+            raw_charts = difficulties.get(chart_type) or []
+            for raw_chart in raw_charts:
+                if not isinstance(raw_chart, dict):
+                    continue
+                chart = _parse_chart(chart_type, raw_chart)
+                if chart is not None:
+                    charts.append(chart)
 
+        try:
+            song_id = int(data["id"])
+            title = str(data["title"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        bpm_value = data.get("bpm")
+        version_value = data.get("version")
+        songs.append(
+            Song(
+                id=song_id,
+                title=title,
+                genre=str(data.get("genre") or "未知分类"),
+                charts=charts,
+                artist=str(data.get("artist") or ""),
+                bpm=(
+                    int(bpm_value)
+                    if isinstance(bpm_value, (int, float))
+                    else None
+                ),
+                version=(
+                    int(version_value)
+                    if isinstance(version_value, (int, float))
+                    else None
+                ),
+                disabled=bool(data.get("disabled", False)),
+            )
+        )
+    return songs
