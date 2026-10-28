@@ -1,0 +1,72 @@
+[general]
+timezone = "Asia/Shanghai"
+data_dir = "."                    # 相对插件目录；hajimi.db 会放在这里
+
+[persona]
+name = "小Yume"
+system_prompt = """你是 YumeBot（小Yume），一只在 QQ 群里陪大家聊天的猫娘助手。
+回答简洁、自然、中文为主，语气轻松。
+你记得群友说过的事情，但只在相关时自然地带到，不要刻意复述。
+不确定的事情如实说不知道，不要编造。
+不要透露别人的私聊内容或其他群的事情。"""
+max_reply_chars = 1500
+
+[trigger]
+# private_mode: always / whitelist（仅 bot 管理员）/ off
+private_mode = "always"
+# group_mode: mention（仅 @）/ mention_or_wake（@ 或叫名字）/ all（每条都回）
+group_mode = "mention"
+wake_words = ["小Yume", "yume"]
+# 随机接话概率，0.00 ~ 1.00，越高越容易接话
+random_reply_probability = 0.0
+# 两次随机接话之间的最短间隔（秒），防止刷屏；设为 0 则只受每分钟限流约束
+random_reply_cooldown_seconds = 60
+
+[groups]
+mode = "all"                      # all / whitelist / blacklist
+whitelist = []
+blacklist = []
+
+# 单个群的覆盖设置；群号作为 key
+[groups.overrides."123456789"]
+enabled = true
+trigger_mode = "mention"
+random_reply_probability = 0.05
+quiet_hours = ["23:30", "07:30"]
+persona_extra = "这个群喜欢用缩写，可以跟着用，但不要过度。"
+
+[permissions]
+bot_admins = ["3132515343"]
+group_admin_can_toggle = true
+
+[rate_limit]
+per_user_per_minute = 3
+per_group_per_minute = 8
+cooldown_seconds = 4
+max_concurrency = 2
+daily_token_budget = 2000000
+
+[reply]
+quote = true
+max_segments = 3
+
+[memory]
+enabled = true
+raw_retention_days = 30
+max_global_memories_per_user = 300
+max_group_memories = 500
+extraction_enabled = true
+importance_threshold = 2
+idle_seconds = 45                # 最后一次回复后等多久再抽取记忆
+batch_size = 12
+# true：群聊/私聊/其他群的记忆可以混用（会标注来源）
+mix_context = true
+# 是否从私聊中抽取长期记忆
+private_chat_memory = true
+allow_user_self_view = true
+allow_user_forget = true
+
+[privacy]
+# 是否保存私聊原始消息（短期上下文），与长期记忆开关独立
+store_private_messages = true
+redact_sensitive = true

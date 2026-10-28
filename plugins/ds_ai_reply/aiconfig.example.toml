@@ -1,0 +1,36 @@
+# 复制本文件为 aiconfig.toml，然后填写 api_key。
+# aiconfig.toml 已被 .gitignore 忽略，不会把密钥提交到仓库。
+
+[provider]
+base_url = "https://api.deepseek.com"
+api_key = "sk-xxxxxxxxxxxxxxxx"
+model = "deepseek-chat"
+timeout = 60.0
+# 是否读取系统代理。Clash 的 socks 代理可能导致连接失败，所以默认关闭；
+# 如果接口需要代理才能访问，改成 true。
+trust_env = false
+max_retries = 1
+
+[generation]
+temperature = 0.8
+top_p = 0.95
+max_tokens = 800
+
+[context]
+window_tokens = 32768        # 自己设的预算，不是模型上限
+chars_per_token = 1.5        # 中文估算，真实用量以 API usage 为准
+reserve_output_tokens = 1200
+memory_tokens = 2500
+profile_tokens = 1200
+recent_message_tokens = 10000
+max_recent_messages = 40
+
+[memory_llm]
+# 记忆抽取使用的模型；base_url / api_key 留空则复用 [provider]
+base_url = ""
+api_key = ""
+model = "deepseek-chat"
+temperature = 0.1
+max_tokens = 1200
+timeout = 40.0
+

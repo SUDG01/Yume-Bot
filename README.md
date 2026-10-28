@@ -17,6 +17,7 @@
 | `/bind <密钥>` | 绑定 LXNet 个人 API Key |
 | `/bind clear` | 清除绑定 |
 | `/天气 <城市>` | 查询城市天气 |
+| `/ai <子命令>` | AI 聊天管理（开关、触发、随机概率、记忆） |
 | `/help` | 显示帮助 |
 
 ## 技术栈
@@ -129,6 +130,47 @@ python bot.py
 歌曲筛选示例：`/查歌 internet`、`/定数查歌 13.5 14.0 DX 紫`、
 `/随歌 紫 14+ POPS`。成绩趋势支持 `/成绩趋势 7`、`/成绩趋势 30` 和
 `/成绩趋势 90`。
+
+## AI 聊天（可选）
+
+`plugins/ds_ai_reply` 通过 OpenAI 兼容接口聊天，并带长期记忆：
+
+- 群聊：@ 机器人、叫唤醒词，或按概率随机接话
+- 私聊：直接发消息
+- 长期记忆：后台异步抽取，跨重启保留；能区分群聊/私聊来源，记忆可混用
+- 群管理：`/ai on|off`、`/ai trigger`、`/ai random 0.05`、`/ai clear`、
+  `/ai memory me`、`/ai forget me`、`/ai status`、`/ai help`
+
+配置分两份：
+
+| 文件 | 内容 |
+|---|---|
+| `plugins/ds_ai_reply/aiconfig.toml` | 接口地址、API Key、模型、上下文预算、记忆抽取模型 |
+| `plugins/ds_ai_reply/bot_config.toml` | 人格、触发方式、群白黑名单、随机接话概率、限流、记忆策略 |
+
+1. 复制并填写密钥配置（`aiconfig.toml` 已被 `.gitignore` 忽略，不会提交）：
+
+```bash
+cp plugins/ds_ai_reply/aiconfig.example.toml plugins/ds_ai_reply/aiconfig.toml
+```
+
+2. 填写 `[provider]` 下的 `base_url`、`api_key`、`model`。
+
+3. 按需修改 `bot_config.toml`。随机接话默认关闭，可在全局或单个群里设置：
+
+```toml
+[trigger]
+random_reply_probability = 0.05       # 0.00 ~ 1.00，越高越容易接话
+
+[groups.overrides."群号"]
+random_reply_probability = 0.20
+```
+
+或在群里让管理员发送 `/ai random 0.20`。
+
+聊天记录 `hajimi.db` 也会被 `.gitignore` 忽略。机器人会保存聊天用于上下文和长期记忆
+（原始消息默认保留 30 天），发送 `/ai forget me` 可以删除自己的记忆。长期记忆、用户画像和
+群管理的完整设计见 [aim.md](aim.md)。
 
 ## 接入更多用户
 

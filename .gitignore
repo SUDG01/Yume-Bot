@@ -6,3 +6,6 @@ mai-bot
 napcat-docker
 src/static/cover/*.png
 src/tools/bindings.db*
+
+plugins/ds_ai_reply/aiconfig.toml
+plugins/ds_ai_reply/*.db*

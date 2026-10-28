@@ -23,6 +23,10 @@ async def help_handle():
 /bind clear      清除绑定
 /bind            查看当前绑定状态
 
+🤖 AI 聊天
+@我 或私聊        和 AI 聊天
+/ai help         AI 管理（开关、触发、随机接话、记忆）
+
 🌤 其他
 /天气 <城市>     查询城市天气
 /help            显示本帮助
