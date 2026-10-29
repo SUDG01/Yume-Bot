@@ -121,6 +121,7 @@
 | `aiconfig.toml` | 接口地址、API Key、模型、温度、超时、上下文 token 预算、记忆抽取模型、embedding 配置、日志脱敏 | **否**（含密钥，`.gitignore`） | 低，改完重启 |
 | `aiconfig.example.toml` | 同上，密钥用占位符 | 是 | 低 |
 | `bot_config.toml` | 人格/系统提示词、触发规则、群白黑名单、限流、权限、记忆保留策略、隐私开关、工具白名单 | 是（不含密钥） | 中，可热重载 |
+| `bot_config.local.toml` | 服务器/本机覆盖项，递归合并到 `bot_config.toml` 之上 | **否**（gitignore） | 中，可热重载 |
 
 **判定规则**：换模型、换服务商、调 token 预算 → `aiconfig.toml`；
 换说话风格、改群规矩、谁能用、记多久 → `bot_config.toml`。
@@ -850,6 +851,9 @@ CREATE TABLE audit_log (
 
 实际文件：`plugins/ds_ai_reply/aiconfig.toml`、`plugins/ds_ai_reply/bot_config.toml`。
 `aiconfig.example.toml` 是可提交的模板。
+
+本机/服务器自定义项写在 `bot_config.local.toml`（已 gitignore，递归覆盖 `bot_config.toml`），
+模板见 `bot_config.local.example.toml`。这样更新代码时不会因为改了人格/管理员/群设置而冲突。
 
 ### 12.1 `aiconfig.toml`（基础设施，含密钥，不入库）
 

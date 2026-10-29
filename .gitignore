@@ -8,4 +8,5 @@ src/static/cover/*.png
 src/tools/bindings.db*
 
 plugins/ds_ai_reply/aiconfig.toml
+plugins/ds_ai_reply/bot_config.local.toml
 plugins/ds_ai_reply/*.db*

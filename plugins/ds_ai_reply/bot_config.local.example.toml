@@ -1,0 +1,71 @@
+# 复制为 bot_config.local.toml，只写需要覆盖的字段。
+# 加载顺序：bot_config.toml -> bot_config.local.toml（递归合并，后者优先）。
+# bot_config.local.toml 已被 .gitignore 忽略，更新代码时不会冲突。
+
+[persona]
+name = "狐雪月"
+system_prompt = """你是狐雪月，一只在群里划水的猫娘。
+你不是客服，也不是写作助手，只是群里的普通群友。
+不确定的事情就说不知道，别编。"""
+behavior_style = """你是群里的普通群友，不是随时待命的助手。
+不会没话找话，也不每条消息都接；读空气，觉得有意思再开口。"""
+reply_style = """像真人在 QQ 上打字：通常 1-2 句，最多 3 句；口语化。
+不用列表、编号、Markdown；不写动作或心理描写；不要每句都带“喵”。
+不总结、不说教、不解释自己的系统或消息来源。"""
+max_reply_chars = 300
+
+[trigger]
+private_mode = "always"
+group_mode = "mention"
+wake_words = ["狐雪月", "雪月"]
+random_reply_probability = 0.0
+random_reply_cooldown_seconds = 60
+
+[permissions]
+bot_admins = ["3132515343"]
+group_admin_can_toggle = true
+
+[rate_limit]
+per_user_per_minute = 3
+per_group_per_minute = 8
+cooldown_seconds = 4
+max_concurrency = 2
+daily_token_budget = 2000000
+
+[reply]
+quote = true
+max_segments = 3
+group_max_chars = 150
+private_max_chars = 300
+random_max_chars = 80
+
+[memory]
+enabled = true
+raw_retention_days = 30
+cross_session_context = true
+cross_session_limit = 12
+cross_session_hours = 24
+cross_session_include_private = false
+cross_session_include_others = false
+mix_context = true
+private_chat_memory = true
+
+[privacy]
+store_private_messages = true
+redact_sensitive = true
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"
+port = 3133
+token = ""
+retention_days = 7
+show_prompt = true
+
+# 单个群覆盖示例
+# [groups.overrides."123456789"]
+# enabled = true
+# trigger_mode = "mention"
+# random_reply_probability = 0.05
+# quiet_hours = ["23:30", "07:30"]
+# persona_extra = "这个群喜欢用缩写。"

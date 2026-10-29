@@ -153,6 +153,14 @@ python bot.py
 |---|---|
 | `plugins/ds_ai_reply/aiconfig.toml` | 接口地址、API Key、模型、上下文预算、记忆抽取模型 |
 | `plugins/ds_ai_reply/bot_config.toml` | 人格、触发方式、群白黑名单、随机接话概率、限流、记忆策略 |
+| `plugins/ds_ai_reply/bot_config.local.toml` | 可选，本机/服务器覆盖项，递归覆盖上一层，已 gitignore |
+
+服务器或本机自定义的人设、管理员、群设置建议写在 `bot_config.local.toml`，不要改
+`bot_config.toml`。这样 `git pull` 更新代码时不会冲突：
+
+```bash
+cp plugins/ds_ai_reply/bot_config.local.example.toml plugins/ds_ai_reply/bot_config.local.toml
+```
 
 1. 复制并填写密钥配置（`aiconfig.toml` 已被 `.gitignore` 忽略，不会提交）：
 

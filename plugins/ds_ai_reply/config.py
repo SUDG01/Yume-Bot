@@ -13,6 +13,7 @@ from pathlib import Path
 PLUGIN_DIR = Path(__file__).parent
 AI_CONFIG_PATH = PLUGIN_DIR / "aiconfig.toml"
 BOT_CONFIG_PATH = PLUGIN_DIR / "bot_config.toml"
+BOT_LOCAL_CONFIG_PATH = PLUGIN_DIR / "bot_config.local.toml"
 
 DEFAULT_SYSTEM_PROMPT = (
     "你是 YumeBot（小Yume），一只住在 QQ 群里的猫娘。"
@@ -327,8 +328,29 @@ def load_ai_config(path: Path = AI_CONFIG_PATH) -> AIConfig:
     )
 
 
-def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
+def _deep_merge(base: dict, override: dict) -> dict:
+    """递归合并：local 覆盖 base，嵌套 section 合并而不是整段替换。"""
+    result = dict(base)
+    for key, value in override.items():
+        current = result.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            result[key] = _deep_merge(current, value)
+        else:
+            result[key] = value
+    return result
+
+
+def _load_bot_data(path: Path) -> dict:
     data = _read_toml(path, "bot_config.toml")
+    local_path = path.with_name("bot_config.local.toml")
+    if local_path.exists():
+        local = _read_toml(local_path, "bot_config.local.toml")
+        data = _deep_merge(data, local)
+    return data
+
+
+def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
+    data = _load_bot_data(path)
     general = _section(data, "general")
     persona = _section(data, "persona")
     trigger = _section(data, "trigger")
@@ -499,7 +521,7 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
 
 _ai_config: AIConfig | None = None
 _bot_config: BotConfig | None = None
-_bot_mtime: float | None = None
+_bot_mtime: tuple[float, float | None] | None = None
 
 
 def get_ai_config(force: bool = False) -> AIConfig:
@@ -509,31 +531,41 @@ def get_ai_config(force: bool = False) -> AIConfig:
     return _ai_config
 
 
+def _bot_config_mtimes() -> tuple[float, float | None]:
+    base = BOT_CONFIG_PATH.stat().st_mtime
+    local = (
+        BOT_LOCAL_CONFIG_PATH.stat().st_mtime
+        if BOT_LOCAL_CONFIG_PATH.exists()
+        else None
+    )
+    return base, local
+
+
 def get_bot_config(force: bool = False) -> BotConfig:
-    """按 mtime 自动感知 bot_config.toml 的变化。
+    """按 mtime 自动感知 bot_config.toml / bot_config.local.toml 的变化。
 
     文件改错时保留上一份可用配置，只记录一条告警，避免整条聊天链路失效。
     """
     global _bot_config, _bot_mtime
     try:
-        mtime = BOT_CONFIG_PATH.stat().st_mtime
+        signature = _bot_config_mtimes()
     except FileNotFoundError as error:
         raise ConfigError("找不到 bot_config.toml，请检查插件目录") from error
 
-    if force or _bot_config is None or _bot_mtime != mtime:
+    if force or _bot_config is None or _bot_mtime != signature:
         try:
             loaded = load_bot_config()
         except ConfigError as error:
             if _bot_config is None:
                 raise
             # 同一个错误 mtime 只尝试一次，修好文件后 mtime 变化会再次加载
-            _bot_mtime = mtime
+            _bot_mtime = signature
             from nonebot import logger
 
-            logger.warning(f"bot_config.toml 加载失败，继续使用上一份配置：{error}")
+            logger.warning(f"bot_config 加载失败，继续使用上一份配置：{error}")
             return _bot_config
         _bot_config = loaded
-        _bot_mtime = mtime
+        _bot_mtime = signature
     return _bot_config
 
 
@@ -542,5 +574,5 @@ def reload_bot_config() -> BotConfig:
     global _bot_config, _bot_mtime
     loaded = load_bot_config()
     _bot_config = loaded
-    _bot_mtime = BOT_CONFIG_PATH.stat().st_mtime
+    _bot_mtime = _bot_config_mtimes()
     return loaded
