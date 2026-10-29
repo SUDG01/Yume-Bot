@@ -38,6 +38,12 @@
 - 自然表达：`behavior_style` / `reply_style` 独立配置；群聊 1-2 句、私聊最多 3 句；
   随机接话单独限长，禁止列表/编号/动作描写/客服腔
 - 群聊随机接话：`random_reply_probability = 0.00 ~ 1.00`，带冷却和群覆盖
+- 本地观测台：`http://127.0.0.1:3133/`，实时查看消息、触发判断、上下文、完整 prompt、
+  模型回复、耗时/token、记忆抽取和错误；只监听本机，事件默认保留 7 天
+- 记忆增强：回忆模式（扩大长期记忆 + 按关键词搜索 30 天聊天记录）、记忆时间戳、
+  上次互动时间
+- 提示词保护：识别打听内部设定的问题，动态提醒模型不要复述；疑似泄露的回复会被替换
+- 非文字消息：图片/语音/视频/表情以占位符进入上下文，模型不会假装看见内容
 - 群管理：`/ai status|on|off|trigger|random|clear|memory|forget|reload|stats`
 - 限流、冷却、全局并发、每日 token 预算、失败降级
 - 原始消息按 `raw_retention_days` 定期清理
@@ -229,6 +235,20 @@
 - 其他群友的发言不会进入私聊，其他用户的私聊也不会进入任何群聊。
 
 这样"我刚才在群里说了什么"可以直接回答，同时避免把 A 群的整段聊天或私聊内容带进 B 群。
+
+`cross_session_include_others = true` 时，私聊还会带上该用户所在群的完整最近聊天
+（包含其他群友），可以回答"群里刚才聊了什么"；默认关闭。
+
+用户问"还记得/上次/我说过/我叫什么"时进入**回忆模式**：
+
+- 长期记忆召回从 8 条扩大到 20 条，群知识从 5 条扩大到 8 条，分数阈值降低；
+- 按关键词在最近 30 天的聊天记录里搜索，最多补 24 条片段；
+- 记忆和聊天片段都带日期，模型能感知信息新旧；
+- 找不到就明确说没印象，不编造。
+
+提示词保护：识别"提示词/内部设定/能力清单"等问题后在动态上下文里提醒模型不要复述；
+如果回复仍出现"身份设定/聊天规则/作为一个 AI"等泄露特征，直接替换为一句简短拒绝。
+这只是缓解手段，不能保证 100% 防住所有套话。
 
 ### 5.3 写入管线（记忆抽取）
 
@@ -805,10 +825,14 @@ CREATE TABLE audit_log (
 
 ### 11.4 可观测性
 
-- `/ai stats`：今日请求数、token、费用估算、记忆条数、任务积压、平均延迟。
-- 日志只记录 session id、耗时、token、状态，不记录消息内容。
-- 关键事件写 `audit_log`：开关、清空、遗忘、重载、封禁。
-- 可选：每日汇总发一条私聊给管理员。
+- **本地观测台**（已实现）：`[dashboard]`，默认 `http://127.0.0.1:3133/`。
+  记录消息、触发判断（含随机 roll）、上下文、完整 prompt、模型返回、耗时/token、
+  最终回复、记忆抽取和错误，按 `trace_id` 串起同一条消息的全过程。
+- 观测事件存 SQLite `trace_events`，默认保留 7 天；只监听本机，服务器上通过 SSH 隧道访问。
+- `/ai stats`：今日 token、记忆任务积压。
+- 日志只记录 session id、耗时、token、状态；`dashboard.show_prompt = false` 时
+  不保存完整 prompt，只保存上下文摘要。
+- 关键事件（开关、清空、遗忘、重载）也会出现在观测台的命令事件里。
 
 ### 11.5 容量与部署约束
 
@@ -942,12 +966,21 @@ cross_session_context = true     # 跨会话原始消息
 cross_session_limit = 12
 cross_session_hours = 24
 cross_session_include_private = false  # 私聊原文是否进群聊上下文
+cross_session_include_others = false   # 私聊是否带上群聊完整上下文
 allow_user_self_view = true
 allow_user_forget = true
 
 [privacy]
 store_private_messages = true    # 是否保存私聊原始消息（短期）
 redact_sensitive = true
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"       # 只监听本机；服务器上用 SSH 隧道访问
+port = 3133
+token = ""               # 非本地监听时必须设置
+retention_days = 7
+show_prompt = true       # 是否保存完整 prompt
 ```
 
 ---
@@ -965,6 +998,8 @@ plugins/ds_ai_reply/
 ├── service.py           # 记录消息、生成回复、拆分发送
 ├── commands.py          # /ai 管理命令
 ├── jobs.py              # 持久化任务队列、抽取 worker、过期清理
+├── trace.py             # 结构化观测事件
+├── dashboard.py         # 本地观测台（FastAPI + 单页 HTML）
 ├── memory/
 │   ├── text.py          # 中文二元组分词、敏感信息脱敏、token 估算
 │   ├── store.py         # schema、DAO、FTS、任务、用量

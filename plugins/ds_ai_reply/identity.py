@@ -29,6 +29,10 @@ def session_type(event: MessageEvent) -> str:
     return "group" if isinstance(event, GroupMessageEvent) else "private"
 
 
+def trace_id(event: MessageEvent) -> str:
+    return f"{session_id(event)}:{event.message_id}"
+
+
 def names(event: MessageEvent) -> list[tuple[str, str]]:
     """返回 (名字, 来源)：群名片 / QQ 昵称。"""
     result: list[tuple[str, str]] = []

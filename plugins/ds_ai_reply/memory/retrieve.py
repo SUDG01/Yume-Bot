@@ -143,6 +143,7 @@ async def build_memory_context(
     group_id: str,
     display_name: str,
     mix_context: bool,
+    recall: bool = False,
     max_candidates: int = 60,
 ) -> MemoryContext:
     context = MemoryContext(display_name=display_name)
@@ -178,8 +179,9 @@ async def build_memory_context(
             (_score(memory, position, len(candidates), speaker_qq), memory)
         )
 
-    # 即使没有命中关键词，也保留少量当前发言者的重要记忆，保证"认识"是连续的
-    for memory in user_memories[:8]:
+    # 即使没有命中关键词，也保留少量当前发言者的重要记忆，保证"认识"是连续的。
+    # 用户明确问"还记得吗/上次"时，扩大召回，避免检索不到就当成忘了。
+    for memory in user_memories[:20 if recall else 8]:
         memory_id = int(memory.get("id", 0))
         if memory_id in seen or int(memory.get("sensitive") or 0):
             continue
@@ -190,7 +192,7 @@ async def build_memory_context(
         scored.append((0.4 + 0.03 * min(5, int(memory.get("importance") or 3)), memory))
 
     # 群知识即使没有命中关键词也保留少量，帮助理解群语境
-    for memory in group_memories[:5]:
+    for memory in group_memories[:8 if recall else 5]:
         memory_id = int(memory.get("id", 0))
         if memory_id in seen or int(memory.get("sensitive") or 0):
             continue
@@ -199,14 +201,17 @@ async def build_memory_context(
 
     scored.sort(key=lambda item: item[0], reverse=True)
 
+    threshold = 0.25 if recall else 0.35
     for score, memory in scored[: max_candidates]:
-        if score < 0.35:
+        if score < threshold:
             continue
         label = _source_label(memory)
         content = str(memory.get("content", "")).strip()
         if not content:
             continue
-        context.memory_lines.append(f"[{label}] {content}")
+        updated = str(memory.get("updated_at") or "")[:10]
+        stamp = f"[{updated}] " if updated else ""
+        context.memory_lines.append(f"[{label}] {stamp}{content}")
         context.used_ids.append(int(memory["id"]))
 
     return context

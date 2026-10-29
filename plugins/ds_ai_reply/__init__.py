@@ -15,7 +15,7 @@ from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
 
 from . import commands as _commands  # noqa: F401  注册 /ai 命令
-from . import identity, jobs, policy, service
+from . import dashboard, identity, jobs, policy, service, trace
 from .config import ConfigError, get_ai_config, get_bot_config
 from .policy import get_effective_group, in_quiet_hours, is_command
 from .memory import store
@@ -39,6 +39,11 @@ async def _startup() -> None:
         return
 
     await store.init_db(config.general.data_dir)
+    trace.configure(
+        enabled=config.dashboard.enabled,
+        show_prompt=config.dashboard.show_prompt,
+    )
+    await dashboard.start(config.dashboard)
     service.configure_concurrency(config.rate_limit.max_concurrency)
     _ready = True
 
@@ -46,9 +51,23 @@ async def _startup() -> None:
         ai_config = get_ai_config()
     except ConfigError as error:
         logger.warning(f"ds_ai_reply 未就绪，AI 回复暂不可用：{error}")
+        await trace.emit(
+            "system",
+            "AI 配置缺失，聊天暂不可用",
+            detail={"error": str(error)},
+        )
         return
 
     await jobs.start_workers()
+    await trace.emit(
+        "system",
+        f"ds_ai_reply 已就绪：{ai_config.provider.model}",
+        detail={
+            "base_url": ai_config.provider.base_url,
+            "random_reply_probability": config.trigger.random_reply_probability,
+            "dashboard": f"http://{config.dashboard.host}:{config.dashboard.port}/",
+        },
+    )
     logger.info(
         f"ds_ai_reply 已就绪：{ai_config.provider.model} @ "
         f"{ai_config.provider.base_url}；"
@@ -59,6 +78,8 @@ async def _startup() -> None:
 @driver.on_shutdown
 async def _shutdown() -> None:
     await jobs.stop_workers()
+    await trace.emit("system", "ds_ai_reply 已停止")
+    await dashboard.stop()
 
 
 def _command_starts() -> set[str]:
@@ -69,7 +90,31 @@ MAX_MESSAGE_CHARS = 2000
 
 
 def _text(event: MessageEvent) -> str:
-    return event.get_plaintext().strip()[:MAX_MESSAGE_CHARS]
+    """保留文字，同时把图片/语音等非文字消息标成占位符，避免模型以为没收到。"""
+    parts: list[str] = []
+    for segment in event.get_message():
+        if segment.type == "text":
+            parts.append(str(segment.data.get("text") or ""))
+        elif segment.type == "image":
+            parts.append("[图片]")
+        elif segment.type == "face":
+            parts.append("[表情]")
+        elif segment.type == "record":
+            parts.append("[语音]")
+        elif segment.type == "video":
+            parts.append("[视频]")
+        elif segment.type == "forward":
+            parts.append("[转发消息]")
+    return "".join(parts).strip()[:MAX_MESSAGE_CHARS]
+
+
+def _trace_ctx(event: MessageEvent) -> trace.TraceContext:
+    return {
+        "trace_id": identity.trace_id(event),
+        "session_id": identity.session_id(event),
+        "group_id": identity.group_id(event),
+        "user_id": identity.user_id(event),
+    }
 
 
 def _direct_trigger(
@@ -136,19 +181,34 @@ async def _record(event: MessageEvent) -> None:
     if str(event.user_id) == str(event.self_id):
         return
     if is_command(text, _command_starts()):
+        await trace.emit(
+            "decision", "命令消息，跳过记录", **_trace_ctx(event)
+        )
         return
 
     try:
         config = get_bot_config()
-    except ConfigError:
+    except ConfigError as error:
+        await trace.emit(
+            "error",
+            "读取 bot_config 失败",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
         return
 
     effective = None
     if identity.is_group(event):
         effective = await get_effective_group(identity.group_id(event), config)
         if not effective.enabled:
+            await trace.emit(
+                "decision", "群 AI 已关闭，不记录", **_trace_ctx(event)
+            )
             return
     elif not config.privacy.store_private_messages:
+        await trace.emit(
+            "decision", "私聊消息存储已关闭", **_trace_ctx(event)
+        )
         return
 
     try:
@@ -159,6 +219,12 @@ async def _record(event: MessageEvent) -> None:
             )
     except Exception as error:
         logger.opt(exception=error).warning("ds_ai_reply 记录消息失败")
+        await trace.emit(
+            "error",
+            "记录消息失败",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
 
 
 @random_matcher.handle()
@@ -175,20 +241,49 @@ async def _random_reply(event: MessageEvent) -> None:
 
     try:
         config = get_bot_config()
-    except ConfigError:
+    except ConfigError as error:
+        await trace.emit(
+            "error",
+            "读取 bot_config 失败",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
         return
     effective = await get_effective_group(identity.group_id(event), config)
     if not effective.enabled:
+        await trace.emit(
+            "decision", "随机接话跳过：群 AI 已关闭", **_trace_ctx(event)
+        )
         return
     if _direct_trigger(event, text, effective, config) is not None:
+        await trace.emit(
+            "decision", "随机接话跳过：该消息会直接触发", **_trace_ctx(event)
+        )
         return
     if effective.random_reply_probability <= 0:
         return
     if effective.quiet_hours and in_quiet_hours(
         effective.quiet_hours, config.general.timezone
     ):
+        await trace.emit(
+            "decision", "随机接话跳过：静音时段", **_trace_ctx(event)
+        )
         return
-    if random.random() >= effective.random_reply_probability:
+
+    roll = random.random()
+    hit = roll < effective.random_reply_probability
+    await trace.emit(
+        "decision",
+        f"随机接话判定：p={effective.random_reply_probability:.2f} "
+        f"roll={roll:.3f} → {'接话' if hit else '不接'}",
+        **_trace_ctx(event),
+        detail={
+            "probability": effective.random_reply_probability,
+            "roll": round(roll, 4),
+            "hit": hit,
+        },
+    )
+    if not hit:
         return
 
     try:
@@ -205,7 +300,13 @@ async def _random_reply(event: MessageEvent) -> None:
         if not blocked.silent and blocked.message:
             await random_matcher.send(MessageSegment.text(blocked.message))
         return
-    except ConfigError:
+    except ConfigError as error:
+        await trace.emit(
+            "error",
+            "AI 配置缺失",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
         return
 
     await service.after_reply(event, result, config)
@@ -226,7 +327,13 @@ async def _direct_reply(event: MessageEvent) -> None:
 
     try:
         config = get_bot_config()
-    except ConfigError:
+    except ConfigError as error:
+        await trace.emit(
+            "error",
+            "读取 bot_config 失败",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
         return
 
     effective = None
@@ -237,9 +344,22 @@ async def _direct_reply(event: MessageEvent) -> None:
     if trigger_kind is None:
         return
 
+    await trace.emit(
+        "decision",
+        f"直接回复触发：{trigger_kind}",
+        **_trace_ctx(event),
+        detail={"trigger": trigger_kind},
+    )
+
     try:
         ai_config = get_ai_config()
     except ConfigError as error:
+        await trace.emit(
+            "error",
+            "AI 配置缺失",
+            **_trace_ctx(event),
+            detail={"error": str(error)},
+        )
         await direct_matcher.finish(f"喵… AI 还没配置好：{error}")
         return
 

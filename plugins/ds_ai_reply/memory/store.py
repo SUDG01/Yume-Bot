@@ -130,6 +130,21 @@ CREATE TABLE IF NOT EXISTS usage_log (
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_log (day);
+
+CREATE TABLE IF NOT EXISTS trace_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id   TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    session_id TEXT NOT NULL DEFAULT '',
+    group_id   TEXT NOT NULL DEFAULT '',
+    user_id    TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL,
+    summary    TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_trace_session ON trace_events (session_id, id);
+CREATE INDEX IF NOT EXISTS idx_trace_kind ON trace_events (kind, id);
+CREATE INDEX IF NOT EXISTS idx_trace_created ON trace_events (created_at);
 """
 
 
@@ -500,23 +515,28 @@ def _get_cross_session_messages_sync(
     limit: int,
     hours: int,
     include_private: bool,
+    include_others: bool,
 ) -> list[dict[str, Any]]:
     conditions = [
         "session_id != ?",
         "created_at >= datetime('now', ?)",
-        "("
-        "(user_id = ? AND role = 'user') OR "
-        "(role = 'assistant' AND session_id IN "
-        "(SELECT DISTINCT session_id FROM messages "
-        " WHERE user_id = ? AND group_id != ''))"
-        ")",
     ]
-    params: list[Any] = [
-        exclude_session,
-        f"-{max(1, hours)} hours",
-        qq,
-        qq,
-    ]
+    params: list[Any] = [exclude_session, f"-{max(1, hours)} hours"]
+    if include_others:
+        # 该用户参与过的群会话里的所有消息（用于私聊回顾群聊）
+        conditions.append(
+            "session_id IN (SELECT DISTINCT session_id FROM messages "
+            "WHERE user_id = ? AND group_id != '')"
+        )
+        params.append(qq)
+    else:
+        conditions.append(
+            "((user_id = ? AND role = 'user') OR "
+            "(role = 'assistant' AND session_id IN "
+            "(SELECT DISTINCT session_id FROM messages "
+            " WHERE user_id = ? AND group_id != '')))"
+        )
+        params.extend([qq, qq])
     if not include_private:
         conditions.append("group_id != ''")
     conn = _connect()
@@ -538,6 +558,7 @@ async def get_cross_session_messages(
     limit: int = 12,
     hours: int = 24,
     include_private: bool = False,
+    include_others: bool = False,
 ) -> list[dict[str, Any]]:
     """当前用户在其他会话（群/私聊）里最近的发言。"""
     return await asyncio.to_thread(
@@ -547,7 +568,87 @@ async def get_cross_session_messages(
         limit,
         hours,
         include_private,
+        include_others,
     )
+
+
+def _search_user_messages_sync(
+    qq: str,
+    query: str,
+    limit: int,
+    days: int,
+    include_private: bool,
+) -> list[dict[str, Any]]:
+    tokens: list[str] = []
+    for token in tokenize(query).split():
+        if len(token) >= 2 and token not in tokens:
+            tokens.append(token)
+        if len(tokens) >= 10:
+            break
+
+    conditions = [
+        "created_at >= datetime('now', ?)",
+        "session_id IN (SELECT DISTINCT session_id FROM messages WHERE user_id = ?)",
+        "((user_id = ? AND role = 'user') OR role = 'assistant')",
+    ]
+    params: list[Any] = [f"-{max(1, days)} days", qq, qq]
+    if not include_private:
+        conditions.append("group_id != ''")
+    if tokens:
+        conditions.append(
+            "(" + " OR ".join("content LIKE ?" for _ in tokens) + ")"
+        )
+        params.extend(
+            f"%{token.replace('%', '').replace('_', '')}%" for token in tokens
+        )
+    else:
+        conditions.append("content LIKE ?")
+        params.append(f"%{query[:20]}%")
+
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in reversed(rows)]
+
+
+async def search_user_messages(
+    qq: str,
+    query: str,
+    limit: int = 20,
+    days: int = 30,
+    include_private: bool = True,
+) -> list[dict[str, Any]]:
+    """在用户参与过的会话里按关键词找回聊天片段。"""
+    return await asyncio.to_thread(
+        _search_user_messages_sync, qq, query, limit, days, include_private
+    )
+
+
+def _session_stats_sync(session_id: str) -> dict[str, Any]:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total, MAX(created_at) AS last_at "
+            "FROM messages WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "total": int(row["total"]) if row else 0,
+        "last_at": (row["last_at"] if row else None),
+    }
+
+
+async def session_stats(session_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_session_stats_sync, session_id)
 
 
 def _get_session_sync(session_id: str) -> dict[str, Any] | None:
@@ -1187,3 +1288,178 @@ def _daily_tokens_sync(day: str) -> int:
 
 async def daily_tokens(day: str) -> int:
     return await asyncio.to_thread(_daily_tokens_sync, day)
+
+
+# ── 观测事件 ────────────────────────────────────────────────
+
+
+def _add_trace_sync(
+    trace_id: str,
+    session_id: str,
+    group_id: str,
+    user_id: str,
+    kind: str,
+    summary: str,
+    detail: str,
+) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO trace_events "
+                "(trace_id, session_id, group_id, user_id, kind, summary, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace_id[:80],
+                    session_id[:80],
+                    group_id[:32],
+                    user_id[:32],
+                    kind[:40],
+                    summary[:1000],
+                    detail,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+async def add_trace(
+    *,
+    trace_id: str = "",
+    session_id: str = "",
+    group_id: str = "",
+    user_id: str = "",
+    kind: str,
+    summary: str,
+    detail: str = "{}",
+) -> None:
+    await asyncio.to_thread(
+        _add_trace_sync,
+        trace_id,
+        session_id,
+        group_id,
+        user_id,
+        kind,
+        summary,
+        detail,
+    )
+
+
+def _get_trace_events_sync(
+    after_id: int,
+    limit: int,
+    session_id: str,
+    kind: str,
+    search: str,
+) -> list[dict[str, Any]]:
+    conditions: list[str] = []
+    params: list[Any] = []
+    if after_id > 0:
+        conditions.append("id > ?")
+        params.append(after_id)
+    if session_id:
+        conditions.append("session_id = ?")
+        params.append(session_id)
+    if kind:
+        conditions.append("kind = ?")
+        params.append(kind)
+    if search:
+        conditions.append("summary LIKE ?")
+        params.append(f"%{search}%")
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM trace_events {where} ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    result: list[dict[str, Any]] = []
+    for row in reversed(rows):
+        item = dict(row)
+        try:
+            item["detail"] = json.loads(item.get("detail") or "{}")
+        except (TypeError, ValueError):
+            item["detail"] = {"raw": item.get("detail")}
+        result.append(item)
+    return result
+
+
+async def get_trace_events(
+    after_id: int = 0,
+    limit: int = 300,
+    session_id: str = "",
+    kind: str = "",
+    search: str = "",
+) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(
+        _get_trace_events_sync, after_id, limit, session_id, kind, search
+    )
+
+
+def _get_trace_sessions_sync() -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT session_id, COUNT(*) AS total, MAX(created_at) AS last_at "
+            "FROM trace_events WHERE session_id != '' "
+            "GROUP BY session_id ORDER BY last_at DESC LIMIT 100"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+async def get_trace_sessions() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_get_trace_sessions_sync)
+
+
+def _trace_stats_sync() -> dict[str, Any]:
+    conn = _connect()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS total FROM trace_events"
+        ).fetchone()
+        today = conn.execute(
+            "SELECT COUNT(*) AS total FROM trace_events "
+            "WHERE created_at >= datetime('now', '-1 day')"
+        ).fetchone()
+        latest = conn.execute(
+            "SELECT COALESCE(MAX(id), 0) AS latest FROM trace_events"
+        ).fetchone()
+        sessions = conn.execute(
+            "SELECT COUNT(DISTINCT session_id) AS total FROM trace_events "
+            "WHERE session_id != ''"
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "total": int(total["total"]) if total else 0,
+        "today": int(today["total"]) if today else 0,
+        "latest_id": int(latest["latest"]) if latest else 0,
+        "sessions": int(sessions["total"]) if sessions else 0,
+    }
+
+
+async def trace_stats() -> dict[str, Any]:
+    return await asyncio.to_thread(_trace_stats_sync)
+
+
+def _prune_traces_sync(days: int) -> int:
+    conn = _connect()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM trace_events WHERE created_at < datetime('now', ?)",
+                (f"-{max(1, days)} days",),
+            )
+            return cursor.rowcount
+    finally:
+        conn.close()
+
+
+async def prune_traces(days: int) -> int:
+    return await asyncio.to_thread(_prune_traces_sync, days)

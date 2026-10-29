@@ -35,3 +35,10 @@ temperature = 0.1
 max_tokens = 1200
 timeout = 40.0
 
+[vision]
+# 如果 provider.model 是视觉模型，改成 true；否则保持 false
+enabled = false
+max_images = 2
+max_bytes = 8388608
+timeout = 15.0
+

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -125,6 +126,43 @@ def is_command(text: str, command_starts: set[str]) -> bool:
 def contains_wake_word(text: str, wake_words: list[str]) -> bool:
     lowered = text.lower()
     return any(word.lower() in lowered for word in wake_words if word)
+
+
+_META_RE = re.compile(
+    r"(系统提示|提示词|prompt|instructions|system\s+message|"
+    r"人设|内部设定|内部规则|你的设定|你的规则|你的框架|你的结构|"
+    r"上文|上面的设定|上面的规则|"
+    r"你能干什么|你能做什么|有什么功能|有什么不足|能力清单|"
+    r"是不是\s*AI|你是\s*AI|你是机器人|什么模型|"
+    r"怎么记住|记忆机制|上下文|后台)",
+    re.IGNORECASE,
+)
+_RECALL_RE = re.compile(
+    r"(记得|记不记得|还记得|上次|之前|以前|我说过|我讲过|"
+    r"我叫什么|我的名字|忘了吗|忘没忘|聊过|回忆)",
+    re.IGNORECASE,
+)
+_LEAK_RE = re.compile(
+    r"(系统提示|提示词|身份设定|聊天规则|记忆相关|内部设定|"
+    r"设定结构|能力清单|作为一个\s*AI|作为机器人|"
+    r"我的功能包括|我的设定是)",
+    re.IGNORECASE,
+)
+
+
+def is_meta_query(text: str) -> bool:
+    """用户在打听提示词、内部设定或能力清单。"""
+    return bool(_META_RE.search(text or ""))
+
+
+def is_recall_query(text: str) -> bool:
+    """用户在问过去发生过的事。"""
+    return bool(_RECALL_RE.search(text or ""))
+
+
+def looks_like_prompt_leak(reply: str) -> bool:
+    """仅在用户打听内部设定时使用，判断回复是否在复述提示词。"""
+    return bool(_LEAK_RE.search(reply or ""))
 
 
 class RateLimiter:

@@ -118,11 +118,20 @@ class MemoryLLMConfig:
 
 
 @dataclass(frozen=True)
+class VisionConfig:
+    enabled: bool
+    max_images: int
+    max_bytes: int
+    timeout: float
+
+
+@dataclass(frozen=True)
 class AIConfig:
     provider: ProviderConfig
     generation: GenerationConfig
     context: ContextConfig
     memory_llm: MemoryLLMConfig
+    vision: VisionConfig
 
 
 @dataclass(frozen=True)
@@ -206,6 +215,7 @@ class MemoryConfig:
     cross_session_limit: int
     cross_session_hours: int
     cross_session_include_private: bool
+    cross_session_include_others: bool
     allow_user_self_view: bool
     allow_user_forget: bool
 
@@ -214,6 +224,16 @@ class MemoryConfig:
 class PrivacyConfig:
     store_private_messages: bool
     redact_sensitive: bool
+
+
+@dataclass(frozen=True)
+class DashboardConfig:
+    enabled: bool
+    host: str
+    port: int
+    token: str
+    retention_days: int
+    show_prompt: bool
 
 
 @dataclass(frozen=True)
@@ -227,6 +247,7 @@ class BotConfig:
     reply: ReplyConfig
     memory: MemoryConfig
     privacy: PrivacyConfig
+    dashboard: DashboardConfig
 
 
 def _read_toml(path: Path, label: str) -> dict:
@@ -245,6 +266,7 @@ def load_ai_config(path: Path = AI_CONFIG_PATH) -> AIConfig:
     generation = _section(data, "generation")
     context = _section(data, "context")
     memory_llm = _section(data, "memory_llm")
+    vision = _section(data, "vision")
 
     api_key = _text(provider.get("api_key"))
     if not api_key:
@@ -293,6 +315,15 @@ def load_ai_config(path: Path = AI_CONFIG_PATH) -> AIConfig:
             max_tokens=max(256, _int(memory_llm.get("max_tokens"), 1200)),
             timeout=max(5.0, _float(memory_llm.get("timeout"), 40.0)),
         ),
+        vision=VisionConfig(
+            enabled=_bool(vision.get("enabled"), False),
+            max_images=min(4, max(1, _int(vision.get("max_images"), 2))),
+            max_bytes=min(
+                20 * 1024 * 1024,
+                max(64 * 1024, _int(vision.get("max_bytes"), 8 * 1024 * 1024)),
+            ),
+            timeout=max(2.0, _float(vision.get("timeout"), 15.0)),
+        ),
     )
 
 
@@ -307,6 +338,7 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
     reply = _section(data, "reply")
     memory = _section(data, "memory")
     privacy = _section(data, "privacy")
+    dashboard = _section(data, "dashboard")
 
     private_mode = _text(trigger.get("private_mode"), "always")
     group_mode = _text(trigger.get("group_mode"), "mention")
@@ -440,6 +472,9 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
             cross_session_include_private=_bool(
                 memory.get("cross_session_include_private"), False
             ),
+            cross_session_include_others=_bool(
+                memory.get("cross_session_include_others"), False
+            ),
             allow_user_self_view=_bool(memory.get("allow_user_self_view"), True),
             allow_user_forget=_bool(memory.get("allow_user_forget"), True),
         ),
@@ -448,6 +483,16 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
                 privacy.get("store_private_messages"), True
             ),
             redact_sensitive=_bool(privacy.get("redact_sensitive"), True),
+        ),
+        dashboard=DashboardConfig(
+            enabled=_bool(dashboard.get("enabled"), True),
+            host=_text(dashboard.get("host"), "127.0.0.1") or "127.0.0.1",
+            port=min(65535, max(1, _int(dashboard.get("port"), 3133))),
+            token=_text(dashboard.get("token")),
+            retention_days=min(
+                365, max(1, _int(dashboard.get("retention_days"), 7))
+            ),
+            show_prompt=_bool(dashboard.get("show_prompt"), True),
         ),
     )
 

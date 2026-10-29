@@ -7,6 +7,7 @@ import asyncio
 from nonebot import logger
 
 from .config import ConfigError, get_ai_config, get_bot_config
+from . import trace
 from .memory import store
 from .memory.extract import extract_session_memories
 from .policy import token_budget
@@ -64,6 +65,23 @@ async def _run_extract(job: dict) -> None:
             int(result.get("completion_tokens", 0) or 0),
             str(result.get("model") or "memory"),
         )
+        await trace.emit(
+            "memory_extract",
+            f"记忆抽取：{result.get('candidates', 0)} 个候选，"
+            f"{result.get('stored', 0)} 条写入",
+            trace_id=f"job:{job.get('id')}",
+            session_id=session_id,
+            group_id=str(session.get("group_id") or ""),
+            user_id=str(session.get("user_id") or ""),
+            detail={
+                "batch": len(messages),
+                "candidates": result.get("candidates", 0),
+                "stored": result.get("stored", 0),
+                "model": result.get("model"),
+                "prompt_tokens": result.get("prompt_tokens"),
+                "completion_tokens": result.get("completion_tokens"),
+            },
+        )
         logger.debug(
             f"ds_ai_reply 记忆抽取 {session_id}: "
             f"{result.get('candidates', 0)} 个候选，"
@@ -98,6 +116,13 @@ async def _worker_loop() -> None:
                 f"ds_ai_reply 任务 {job.get('kind')} 失败"
             )
             await store.fail_job(int(job["id"]), str(error))
+            await trace.emit(
+                "error",
+                f"后台任务失败：{job.get('kind')}",
+                trace_id=f"job:{job.get('id')}",
+                session_id=str(job.get("session_id") or ""),
+                detail={"kind": job.get("kind"), "error": str(error)},
+            )
 
 
 async def _maintenance_loop() -> None:
@@ -109,10 +134,14 @@ async def _maintenance_loop() -> None:
                     config.memory.raw_retention_days
                 )
                 superseded = await store.prune_superseded(90)
-                if removed or superseded:
+                traces = await store.prune_traces(
+                    config.dashboard.retention_days
+                )
+                if removed or superseded or traces:
                     logger.info(
                         f"ds_ai_reply 清理：{removed} 条过期消息，"
-                        f"{superseded} 条被覆盖的旧记忆"
+                        f"{superseded} 条被覆盖的旧记忆，"
+                        f"{traces} 条观测事件"
                     )
         except Exception as error:
             logger.opt(exception=error).warning("ds_ai_reply 维护任务失败")

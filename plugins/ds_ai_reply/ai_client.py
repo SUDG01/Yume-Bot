@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
@@ -92,7 +93,7 @@ def _extract_usage(response: object) -> tuple[int, int]:
 
 
 async def request_reply(
-    messages: list[dict[str, str]], config: AIConfig | None = None
+    messages: list[dict[str, Any]], config: AIConfig | None = None
 ) -> AIResult:
     config = config or get_ai_config()
     provider: ProviderConfig = config.provider
@@ -111,7 +112,7 @@ async def request_reply(
 
 
 async def request_json(
-    messages: list[dict[str, str]], config: AIConfig | None = None
+    messages: list[dict[str, Any]], config: AIConfig | None = None
 ) -> AIResult:
     config = config or get_ai_config()
     memory = config.memory_llm

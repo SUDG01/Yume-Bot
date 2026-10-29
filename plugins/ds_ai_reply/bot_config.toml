@@ -84,6 +84,9 @@ cross_session_limit = 12
 cross_session_hours = 24
 # 是否把私聊原始消息也带进群聊上下文（默认关闭，避免群友看到私聊内容）
 cross_session_include_private = false
+# 私聊时是否带上该用户所在群的完整最近聊天（包含其他群友发言）
+# 默认关闭；打开后可以在私聊里问“群里刚才聊了什么”
+cross_session_include_others = false
 allow_user_self_view = true
 allow_user_forget = true
 
@@ -91,3 +94,12 @@ allow_user_forget = true
 # 是否保存私聊原始消息（短期上下文），与长期记忆开关独立
 store_private_messages = true
 redact_sensitive = true
+
+[dashboard]
+# 本地观测台，查看消息、判断、prompt、模型回复、记忆抽取
+enabled = true
+host = "127.0.0.1"       # 只监听本机；服务器上请用 SSH 隧道访问
+port = 3133
+token = ""               # 非本地监听时必须设置
+retention_days = 7       # 观测事件保留天数
+show_prompt = true       # 是否保存发给模型的完整 prompt（含聊天内容）

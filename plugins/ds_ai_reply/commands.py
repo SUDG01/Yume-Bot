@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from nonebot import on_command
 from nonebot.adapters import Message
 from nonebot.adapters.onebot.v11 import MessageEvent
 from nonebot.params import CommandArg
 from nonebot.rule import to_me
 
+from . import trace
 from .config import (
     VALID_GROUP_MODES,
     ConfigError,
@@ -75,6 +79,16 @@ async def handle_ai(event: MessageEvent, args: Message = CommandArg()):
     parts = raw.split()
     action = parts[0].lower() if parts else "help"
     config = get_bot_config()
+
+    await trace.emit(
+        "command",
+        f"/ai {action}",
+        trace_id=f"{session_id(event)}:{event.message_id}",
+        session_id=session_id(event),
+        group_id=group_id(event),
+        user_id=user_id(event),
+        detail={"args": parts[1:]},
+    )
 
     if action in {"help", ""}:
         await ai_cmd.finish(HELP_TEXT)
@@ -256,9 +270,27 @@ async def handle_ai(event: MessageEvent, args: Message = CommandArg()):
     await ai_cmd.finish(HELP_TEXT)
 
 
+def _local_time(value: object, timezone_name: str) -> str:
+    if not value:
+        return "暂无"
+    try:
+        moment = datetime.strptime(
+            str(value), "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+        return moment.astimezone(ZoneInfo(timezone_name)).strftime("%m-%d %H:%M")
+    except (ValueError, ZoneInfoNotFoundError):
+        return str(value)
+
+
 async def _status(event: MessageEvent) -> None:
     config = get_bot_config()
     gid = group_id(event)
+    stats = await store.session_stats(session_id(event))
+    last_at = _local_time(stats.get("last_at"), config.general.timezone)
+    memory_count = await store.count_user_memories(user_id(event))
+    cross = "开启" if config.memory.cross_session_context else "关闭"
+    mix = "开启" if config.memory.mix_context else "关闭"
+
     if gid:
         effective = await get_effective_group(gid, config)
         enabled = "开启" if effective.enabled else "关闭"
@@ -267,11 +299,17 @@ async def _status(event: MessageEvent) -> None:
             f"状态：{enabled}\n"
             f"触发：{effective.trigger_mode}\n"
             f"随机接话概率：{effective.random_reply_probability:.2f}\n"
+            f"已记录消息：{stats.get('total', 0)} 条（最近 {last_at}）\n"
+            f"跨会话上下文：{cross}，记忆混用：{mix}\n"
+            f"我的记忆：{memory_count} 条\n"
             f"人格：{config.persona.name}"
         )
         return
     await ai_cmd.finish(
         f"—— 私聊 AI 状态 ——\n"
         f"状态：{config.trigger.private_mode}\n"
+        f"已记录消息：{stats.get('total', 0)} 条（最近 {last_at}）\n"
+        f"跨会话上下文：{cross}，记忆混用：{mix}\n"
+        f"我的记忆：{memory_count} 条\n"
         f"人格：{config.persona.name}"
     )
