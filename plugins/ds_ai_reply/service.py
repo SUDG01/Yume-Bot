@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageEvent
@@ -113,6 +114,22 @@ async def generate_reply(
     except Exception as error:
         logger.opt(exception=error).warning("ds_ai_reply 读取历史消息失败")
         recent = []
+
+    cross_messages: list[dict[str, Any]] = []
+    if config.memory.cross_session_context:
+        try:
+            cross_messages = await store.get_cross_session_messages(
+                speaker,
+                session,
+                config.memory.cross_session_limit,
+                config.memory.cross_session_hours,
+                config.memory.cross_session_include_private,
+            )
+        except Exception as error:
+            logger.opt(exception=error).warning(
+                "ds_ai_reply 读取跨会话消息失败"
+            )
+
     messages = build_messages(
         config=config,
         ai_config=ai_config,
@@ -124,6 +141,7 @@ async def generate_reply(
         group_id=group,
         trigger_kind=trigger_kind,
         memory=memory_context,
+        cross_messages=cross_messages,
     )
 
     try:
@@ -146,7 +164,14 @@ async def generate_reply(
         config, result.prompt_tokens, result.completion_tokens, result.model
     )
 
-    reply = result.text.strip()[: config.persona.max_reply_chars].strip()
+    if trigger_kind == "random":
+        max_chars = config.reply.random_max_chars
+    elif group:
+        max_chars = config.reply.group_max_chars
+    else:
+        max_chars = config.reply.private_max_chars
+    max_chars = min(max_chars, config.persona.max_reply_chars)
+    reply = result.text.strip()[:max_chars].strip()
     if not reply:
         raise ReplyBlocked(silent=True)
 

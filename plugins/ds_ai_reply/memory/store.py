@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages (session_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_user ON messages (user_id, id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -490,6 +491,62 @@ async def get_messages_since(
 ) -> list[dict[str, Any]]:
     return await asyncio.to_thread(
         _get_messages_since_sync, session_id, after_id, limit
+    )
+
+
+def _get_cross_session_messages_sync(
+    qq: str,
+    exclude_session: str,
+    limit: int,
+    hours: int,
+    include_private: bool,
+) -> list[dict[str, Any]]:
+    conditions = [
+        "session_id != ?",
+        "created_at >= datetime('now', ?)",
+        "("
+        "(user_id = ? AND role = 'user') OR "
+        "(role = 'assistant' AND session_id IN "
+        "(SELECT DISTINCT session_id FROM messages "
+        " WHERE user_id = ? AND group_id != ''))"
+        ")",
+    ]
+    params: list[Any] = [
+        exclude_session,
+        f"-{max(1, hours)} hours",
+        qq,
+        qq,
+    ]
+    if not include_private:
+        conditions.append("group_id != ''")
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in reversed(rows)]
+
+
+async def get_cross_session_messages(
+    qq: str,
+    exclude_session: str,
+    limit: int = 12,
+    hours: int = 24,
+    include_private: bool = False,
+) -> list[dict[str, Any]]:
+    """当前用户在其他会话（群/私聊）里最近的发言。"""
+    return await asyncio.to_thread(
+        _get_cross_session_messages_sync,
+        qq,
+        exclude_session,
+        limit,
+        hours,
+        include_private,
     )
 
 

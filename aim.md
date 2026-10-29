@@ -33,6 +33,10 @@
 - 短期上下文：按会话保存最近消息，群聊/私聊来源标注
 - 长期记忆：LLM 异步抽取、去重、同槽位覆盖、SQLite FTS5（中文二元组）检索、来源标注
 - 记忆混用：`mix_context = true` 时当前发言者的跨群/私聊记忆都会进入上下文
+- 跨会话原文：私聊能看到该用户最近在群里的发言；群聊能看到他在其他群的发言
+  （私聊原文默认不进群，避免泄露）
+- 自然表达：`behavior_style` / `reply_style` 独立配置；群聊 1-2 句、私聊最多 3 句；
+  随机接话单独限长，禁止列表/编号/动作描写/客服腔
 - 群聊随机接话：`random_reply_probability = 0.00 ~ 1.00`，带冷却和群覆盖
 - 群管理：`/ai status|on|off|trigger|random|clear|memory|forget|reload|stats`
 - 限流、冷却、全局并发、每日 token 预算、失败降级
@@ -215,6 +219,16 @@
 群聊只用 `user_global + 本群 user_group + group`，私聊只用 `user_global + private`。
 
 在群里使用 `private` 来源的记忆时，提示词会明确要求"不要主动说出私聊内容"。
+
+除了长期记忆，还会注入**当前发言者自己的跨会话原始消息**（`cross_session_context`）：
+
+- 私聊中带上该用户最近在群里的发言（`[群聊 群号]`）；
+- 群聊中带上该用户在其他群的发言，默认不带上私聊原文
+  （`cross_session_include_private = false`）；
+- 只取最近 `cross_session_hours` 小时内、最多 `cross_session_limit` 条；
+- 其他群友的发言不会进入私聊，其他用户的私聊也不会进入任何群聊。
+
+这样"我刚才在群里说了什么"可以直接回答，同时避免把 A 群的整段聊天或私聊内容带进 B 群。
 
 ### 5.3 写入管线（记忆抽取）
 
@@ -437,9 +451,15 @@ access_score = min(1, log1p(access_count) / 3)
 ### 7.2 回复策略
 
 - 默认引用触发消息（`quote = true`），便于群里看清上下文；随机接话不引用。
-- 单条回复上限 1500 字；超长按段落拆成最多 3 条。
+- 单条回复上限 300 字（`persona.max_reply_chars`），随机接话上限 80 字
+  （`reply.random_max_chars`）；超长按段落拆成最多 3 条。
+- `behavior_style` 管"什么时候开口、要不要接话"，`reply_style` 管"怎么说话"；
+  默认要求短句、口语化、不用列表/编号/动作描写、不解释系统。
 - 模型输出统一走 `MessageSegment.text()`，杜绝 CQ 码注入。
 - 空回复不发送。（重复回复检查、打字延迟为后续项。）
+
+> 风格分层参考了 [MaiBot](https://github.com/Mai-with-u/MaiBot) 的
+> `behavior_style` / `reply_style` / 群聊提示词思路（只借鉴设计，未复制代码）。
 
 ### 7.3 权限
 
@@ -831,6 +851,7 @@ memory_tokens = 2500
 profile_tokens = 1200
 recent_message_tokens = 10000
 max_recent_messages = 40
+cross_session_tokens = 1000
 
 [memory_llm]
 # 记忆抽取使用的模型；base_url / api_key 留空则复用 [provider]
@@ -851,12 +872,22 @@ data_dir = "."                   # 相对插件目录；hajimi.db 会放在这�
 
 [persona]
 name = "小Yume"
-system_prompt = """你是 YumeBot（小Yume），一只在 QQ 群里陪大家聊天的猫娘助手。
-回答简洁、自然、中文为主，语气轻松。
-你记得群友说过的事情，但只在相关时自然地带到，不要刻意复述。
-不确定的事情如实说不知道，不要编造。
-不要透露别人的私聊内容或其他群的事情。"""
-max_reply_chars = 1500
+system_prompt = """你是 YumeBot（小Yume），一只住在 QQ 群里的猫娘。
+你不是客服，也不是写作助手，只是群里的一个普通群友。
+不确定的事情如实说不知道，不要编造。"""
+
+behavior_style = """你是群里的普通群友，不是随时待命的助手。
+不会没话找话，也不每条消息都接；读空气，觉得有意思再开口。
+有自己的小情绪，但不刻意卖萌，也不讨好。"""
+
+reply_style = """像真人在 QQ 上打字：通常 1-2 句，最多 3 句；口语化，可以省略主语。
+不用列表、编号、Markdown、代码块；不写动作或心理描写（如（歪头）（小声））。
+不要用“首先/其次/最后/总结一下/最省事的办法是”这类条理词，
+也不要用“作为一个…”“我理解你…”这种助手腔，不要主动问“还需要什么”。
+不要每句都带“喵”，一句里最多一个语气词。
+不总结、不说教、不主动提出验证步骤，也不解释自己的系统或消息来源。"""
+
+max_reply_chars = 300
 
 [trigger]
 private_mode = "always"          # always / whitelist（仅 bot 管理员）/ off
@@ -892,6 +923,9 @@ daily_token_budget = 2000000
 [reply]
 quote = true
 max_segments = 3
+group_max_chars = 150
+private_max_chars = 300
+random_max_chars = 80
 
 [memory]
 enabled = true
@@ -902,8 +936,12 @@ extraction_enabled = true
 importance_threshold = 2
 idle_seconds = 45                # 最后一次记录后等多久再抽取
 batch_size = 12
-mix_context = true               # 记忆跨群/私聊混用，来源会标注
+mix_context = true               # 长期记忆跨群/私聊混用，来源会标注
 private_chat_memory = true       # 是否从私聊抽取长期记忆
+cross_session_context = true     # 跨会话原始消息
+cross_session_limit = 12
+cross_session_hours = 24
+cross_session_include_private = false  # 私聊原文是否进群聊上下文
 allow_user_self_view = true
 allow_user_forget = true
 

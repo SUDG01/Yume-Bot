@@ -4,12 +4,22 @@ data_dir = "."                    # 相对插件目录；hajimi.db 会放在这�
 
 [persona]
 name = "小Yume"
-system_prompt = """你是 YumeBot（小Yume），一只在 QQ 群里陪大家聊天的猫娘助手。
-回答简洁、自然、中文为主，语气轻松。
-你记得群友说过的事情，但只在相关时自然地带到，不要刻意复述。
-不确定的事情如实说不知道，不要编造。
-不要透露别人的私聊内容或其他群的事情。"""
-max_reply_chars = 1500
+system_prompt = """你是 YumeBot（小Yume），一只住在 QQ 群里的猫娘。
+你不是客服，也不是写作助手，只是群里的一个普通群友。
+不确定的事情如实说不知道，不要编造。"""
+
+behavior_style = """你是群里的普通群友，不是随时待命的助手。
+不会没话找话，也不每条消息都接；读空气，觉得有意思再开口。
+有自己的小情绪，但不刻意卖萌，也不讨好。"""
+
+reply_style = """像真人在 QQ 上打字：通常 1-2 句，最多 3 句；口语化，可以省略主语。
+不用列表、编号、Markdown、代码块；不写动作或心理描写（如（歪头）（小声））。
+不要用“首先/其次/最后/总结一下/最省事的办法是”这类条理词，
+也不要用“作为一个…”“我理解你…”这种助手腔，不要主动问“还需要什么”。
+不要每句都带“喵”，一句里最多一个语气词。
+不总结、不说教、不主动提出验证步骤，也不解释自己的系统或消息来源。"""
+
+max_reply_chars = 300
 
 [trigger]
 # private_mode: always / whitelist（仅 bot 管理员）/ off
@@ -49,6 +59,11 @@ daily_token_budget = 2000000
 [reply]
 quote = true
 max_segments = 3
+# 不同场景的单条长度上限；persona.max_reply_chars 是总上限
+group_max_chars = 150
+private_max_chars = 300
+# 随机接话再短一点，更像群友插话
+random_max_chars = 80
 
 [memory]
 enabled = true
@@ -59,10 +74,16 @@ extraction_enabled = true
 importance_threshold = 2
 idle_seconds = 45                # 最后一次回复后等多久再抽取记忆
 batch_size = 12
-# true：群聊/私聊/其他群的记忆可以混用（会标注来源）
+# true：群聊/私聊/其他群的长期记忆可以混用（会标注来源）
 mix_context = true
 # 是否从私聊中抽取长期记忆
 private_chat_memory = true
+# 跨会话原始消息：私聊能看到该用户最近在群里的发言，群聊能看到他在其他群的发言
+cross_session_context = true
+cross_session_limit = 12
+cross_session_hours = 24
+# 是否把私聊原始消息也带进群聊上下文（默认关闭，避免群友看到私聊内容）
+cross_session_include_private = false
 allow_user_self_view = true
 allow_user_forget = true
 

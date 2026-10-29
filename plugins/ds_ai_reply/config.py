@@ -15,9 +15,24 @@ AI_CONFIG_PATH = PLUGIN_DIR / "aiconfig.toml"
 BOT_CONFIG_PATH = PLUGIN_DIR / "bot_config.toml"
 
 DEFAULT_SYSTEM_PROMPT = (
-    "你是 YumeBot（小Yume），一只在 QQ 群里陪大家聊天的猫娘助手。"
-    "回答简洁、自然、中文为主，语气轻松。"
+    "你是 YumeBot（小Yume），一只住在 QQ 群里的猫娘。"
+    "你不是客服，也不是写作助手，只是群里的一个普通群友。"
     "不确定的事情如实说不知道，不要编造。"
+)
+
+DEFAULT_BEHAVIOR_STYLE = (
+    "你是群里的普通群友，不是随时待命的助手。"
+    "不会没话找话，也不每条消息都接；读空气，觉得有意思再开口。"
+    "有自己的小情绪，但不刻意卖萌，也不讨好。"
+)
+
+DEFAULT_REPLY_STYLE = (
+    "像真人在 QQ 上打字：通常 1-2 句，最多 3 句；口语化，可以省略主语。"
+    "不用列表、编号、Markdown、代码块；不写动作或心理描写（如（歪头）（小声））。"
+    "不要用“首先/其次/最后/总结一下/最省事的办法是”这类条理词，"
+    "也不要用“作为一个…”“我理解你…”这种助手腔，不要主动问“还需要什么”。"
+    "不要每句都带“喵”，一句里最多一个语气词。"
+    "不总结、不说教、不主动提出验证步骤，也不解释自己的系统或消息来源。"
 )
 
 VALID_PRIVATE_MODES = {"always", "whitelist", "off"}
@@ -89,6 +104,7 @@ class ContextConfig:
     profile_tokens: int
     recent_message_tokens: int
     max_recent_messages: int
+    cross_session_tokens: int
 
 
 @dataclass(frozen=True)
@@ -119,6 +135,8 @@ class GeneralConfig:
 class PersonaConfig:
     name: str
     system_prompt: str
+    behavior_style: str
+    reply_style: str
     max_reply_chars: int
 
 
@@ -167,6 +185,9 @@ class RateLimitConfig:
 class ReplyConfig:
     quote: bool
     max_segments: int
+    group_max_chars: int
+    private_max_chars: int
+    random_max_chars: int
 
 
 @dataclass(frozen=True)
@@ -181,6 +202,10 @@ class MemoryConfig:
     batch_size: int
     mix_context: bool
     private_chat_memory: bool
+    cross_session_context: bool
+    cross_session_limit: int
+    cross_session_hours: int
+    cross_session_include_private: bool
     allow_user_self_view: bool
     allow_user_forget: bool
 
@@ -253,6 +278,9 @@ def load_ai_config(path: Path = AI_CONFIG_PATH) -> AIConfig:
             ),
             max_recent_messages=min(
                 200, max(4, _int(context.get("max_recent_messages"), 40))
+            ),
+            cross_session_tokens=max(
+                0, _int(context.get("cross_session_tokens"), 1000)
             ),
         ),
         memory_llm=MemoryLLMConfig(
@@ -327,8 +355,11 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
         persona=PersonaConfig(
             name=_text(persona.get("name"), "小Yume") or "小Yume",
             system_prompt=_text(persona.get("system_prompt")) or DEFAULT_SYSTEM_PROMPT,
+            behavior_style=_text(persona.get("behavior_style"))
+            or DEFAULT_BEHAVIOR_STYLE,
+            reply_style=_text(persona.get("reply_style")) or DEFAULT_REPLY_STYLE,
             max_reply_chars=min(
-                4000, max(100, _int(persona.get("max_reply_chars"), 1500))
+                4000, max(20, _int(persona.get("max_reply_chars"), 300))
             ),
         ),
         trigger=TriggerConfig(
@@ -368,6 +399,15 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
         reply=ReplyConfig(
             quote=_bool(reply.get("quote"), True),
             max_segments=min(5, max(1, _int(reply.get("max_segments"), 3))),
+            group_max_chars=min(
+                2000, max(20, _int(reply.get("group_max_chars"), 150))
+            ),
+            private_max_chars=min(
+                4000, max(20, _int(reply.get("private_max_chars"), 300))
+            ),
+            random_max_chars=min(
+                500, max(10, _int(reply.get("random_max_chars"), 80))
+            ),
         ),
         memory=MemoryConfig(
             enabled=_bool(memory.get("enabled"), True),
@@ -388,6 +428,18 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
             batch_size=min(50, max(1, _int(memory.get("batch_size"), 12))),
             mix_context=_bool(memory.get("mix_context"), True),
             private_chat_memory=_bool(memory.get("private_chat_memory"), True),
+            cross_session_context=_bool(
+                memory.get("cross_session_context"), True
+            ),
+            cross_session_limit=min(
+                50, max(1, _int(memory.get("cross_session_limit"), 12))
+            ),
+            cross_session_hours=min(
+                720, max(1, _int(memory.get("cross_session_hours"), 24))
+            ),
+            cross_session_include_private=_bool(
+                memory.get("cross_session_include_private"), False
+            ),
             allow_user_self_view=_bool(memory.get("allow_user_self_view"), True),
             allow_user_forget=_bool(memory.get("allow_user_forget"), True),
         ),

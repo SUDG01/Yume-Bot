@@ -24,6 +24,7 @@ memory_tokens = 2500
 profile_tokens = 1200
 recent_message_tokens = 10000
 max_recent_messages = 40
+cross_session_tokens = 1000   # 当前用户在其他群/私聊的最近发言预算
 
 [memory_llm]
 # 记忆抽取使用的模型；base_url / api_key 留空则复用 [provider]

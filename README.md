@@ -138,6 +138,9 @@ python bot.py
 - 群聊：@ 机器人、叫唤醒词，或按概率随机接话
 - 私聊：直接发消息
 - 长期记忆：后台异步抽取，跨重启保留；能区分群聊/私聊来源，记忆可混用
+- 跨会话上下文：私聊能接上你刚在群里说的话；群聊也能看到你在其他群的发言
+- 自然表达：`behavior_style` / `reply_style` 控制说话方式，默认短句口语化，
+  不用列表/编号/动作描写，随机接话有单独的长度上限
 - 群管理：`/ai on|off`、`/ai trigger`、`/ai random 0.05`、`/ai clear`、
   `/ai memory me`、`/ai forget me`、`/ai status`、`/ai help`
 
@@ -182,3 +185,4 @@ random_reply_probability = 0.20
 - [NapCat](https://github.com/NapNeko/NapCatQQ) — QQ 协议端
 - [LXNet](https://maimai.lxns.net) — Maimai 数据 API
 - [maimai-bot](https://github.com/Diving-Fish/maimaidx-prober) — 参考项目
+- [MaiBot](https://github.com/Mai-with-u/MaiBot) — AI 聊天风格与跨会话记忆的设计参考
