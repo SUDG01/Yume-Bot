@@ -60,7 +60,7 @@ class EffectiveGroup:
     group_id: str
     enabled: bool = True
     trigger_mode: str = "mention"
-    random_reply_probability: float = 0.0
+    chat_willingness: float = 0.0
     quiet_hours: list[str] = field(default_factory=list)
     persona_extra: str = ""
 
@@ -69,7 +69,7 @@ async def effective_group(group_id: str, config: BotConfig) -> EffectiveGroup:
     effective = EffectiveGroup(
         group_id=group_id,
         trigger_mode=config.trigger.group_mode,
-        random_reply_probability=config.trigger.random_reply_probability,
+        chat_willingness=config.trigger.chat_willingness,
     )
 
     groups = config.groups
@@ -84,8 +84,8 @@ async def effective_group(group_id: str, config: BotConfig) -> EffectiveGroup:
             effective.enabled = override.enabled
         if override.trigger_mode is not None:
             effective.trigger_mode = override.trigger_mode
-        if override.random_reply_probability is not None:
-            effective.random_reply_probability = override.random_reply_probability
+        if override.chat_willingness is not None:
+            effective.chat_willingness = override.chat_willingness
         effective.quiet_hours = list(override.quiet_hours)
         effective.persona_extra = override.persona_extra
 
@@ -96,7 +96,7 @@ async def effective_group(group_id: str, config: BotConfig) -> EffectiveGroup:
         if stored.get("trigger_mode"):
             effective.trigger_mode = str(stored["trigger_mode"])
         if stored.get("random_probability") is not None:
-            effective.random_reply_probability = float(stored["random_probability"])
+            effective.chat_willingness = float(stored["random_probability"])
         if stored.get("quiet_hours"):
             effective.quiet_hours = [
                 item.strip()
@@ -264,7 +264,52 @@ class TokenBudget:
             self._checked_at = time.monotonic()
 
 
+class DecisionLimiter:
+    """限制每个群每小时调用“要不要接话”决策模型的次数。"""
+
+    def __init__(self) -> None:
+        self._events: defaultdict[str, deque[float]] = defaultdict(deque)
+        self._no_action: defaultdict[str, int] = defaultdict(int)
+        self._next_at: dict[str, float] = {}
+
+    def ready(self, group: str) -> bool:
+        return time.monotonic() >= self._next_at.get(group, 0.0)
+
+    def allow(self, group: str, per_hour: int) -> bool:
+        if not self.ready(group):
+            return False
+        if per_hour <= 0:
+            return True
+        now = time.monotonic()
+        bucket = self._events[group]
+        while bucket and now - bucket[0] >= 3600:
+            bucket.popleft()
+        if len(bucket) >= per_hour:
+            return False
+        bucket.append(now)
+        return True
+
+    def note_no_action(
+        self, group: str, base_seconds: int, cap_seconds: int, start_count: int
+    ) -> None:
+        """连续决定不说话后指数退避，避免频繁打扰模型。"""
+        self._no_action[group] += 1
+        count = self._no_action[group]
+        if count >= max(1, start_count):
+            exponent = min(10, count - max(1, start_count))
+            delay = min(
+                max(0, cap_seconds),
+                max(0, base_seconds) * (2 ** exponent),
+            )
+            self._next_at[group] = time.monotonic() + delay
+
+    def note_action(self, group: str) -> None:
+        self._no_action[group] = 0
+        self._next_at.pop(group, None)
+
+
 rate_limiter = RateLimiter()
+decision_limiter = DecisionLimiter()
 token_budget = TokenBudget()
 
 _effective_cache: dict[str, tuple[float, BotConfig, EffectiveGroup]] = {}

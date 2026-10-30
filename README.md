@@ -17,7 +17,7 @@
 | `/bind <密钥>` | 绑定 LXNet 个人 API Key |
 | `/bind clear` | 清除绑定 |
 | `/天气 <城市>` | 查询城市天气 |
-| `/ai <子命令>` | AI 聊天管理（开关、触发、随机概率、记忆） |
+| `/ai <子命令>` | AI 聊天管理（开关、触发、聊天意愿、记忆） |
 | `/help` | 显示帮助 |
 
 ## 技术栈
@@ -135,16 +135,18 @@ python bot.py
 
 `plugins/ds_ai_reply` 通过 OpenAI 兼容接口聊天，并带长期记忆：
 
-- 群聊：@ 机器人、叫唤醒词，或按概率随机接话
+- 群聊：@ 机器人、叫唤醒词，或按聊天意愿主动接话
 - 私聊：直接发消息
 - 长期记忆：后台异步抽取，跨重启保留；能区分群聊/私聊来源，记忆可混用
 - 跨会话上下文：私聊能接上你刚在群里说的话；群聊也能看到你在其他群的发言
 - 回忆模式：问到“还记得/上次/我说过”时，扩大长期记忆和聊天记录检索
 - 自然表达：`behavior_style` / `reply_style` 控制说话方式，默认短句口语化，
-  不用列表/编号/动作描写，随机接话有单独的长度上限
+  不用列表/编号/动作描写；长回复会拆成几条短消息发送
+- 聊天意愿：`chat_willingness` 控制“多常考虑接话”，再由模型读空气决定最终要不要说
 - 提示词保护：被问到系统提示词/内部设定/能力清单时简短带过，不复述结构
-- 图片/语音/视频会以 `[图片]` 等占位符进入上下文，不会编造内容（暂不支持真正看图）
-- 群管理：`/ai on|off`、`/ai trigger`、`/ai random 0.05`、`/ai clear`、
+- 图片输入：`[vision] enabled = true` 时，当前消息里的图片会传给视觉模型
+- 图片/语音/视频在没有启用视觉时会以 `[图片]` 等占位符进入上下文，不会编造内容
+- 群管理：`/ai on|off`、`/ai trigger`、`/ai willingness 0.35`、`/ai clear`、
   `/ai memory me`、`/ai forget me`、`/ai status`、`/ai help`
 
 配置分两份：
@@ -152,7 +154,7 @@ python bot.py
 | 文件 | 内容 |
 |---|---|
 | `plugins/ds_ai_reply/aiconfig.toml` | 接口地址、API Key、模型、上下文预算、记忆抽取模型 |
-| `plugins/ds_ai_reply/bot_config.toml` | 人格、触发方式、群白黑名单、随机接话概率、限流、记忆策略 |
+| `plugins/ds_ai_reply/bot_config.toml` | 人格、触发方式、群白黑名单、聊天意愿、回复分条、限流、记忆策略 |
 | `plugins/ds_ai_reply/bot_config.local.toml` | 可选，本机/服务器覆盖项，递归覆盖上一层，已 gitignore |
 
 服务器或本机自定义的人设、管理员、群设置建议写在 `bot_config.local.toml`，不要改
@@ -170,17 +172,31 @@ cp plugins/ds_ai_reply/aiconfig.example.toml plugins/ds_ai_reply/aiconfig.toml
 
 2. 填写 `[provider]` 下的 `base_url`、`api_key`、`model`。
 
-3. 按需修改 `bot_config.toml`。随机接话默认关闭，可在全局或单个群里设置：
+3. 按需修改 `bot_config.local.toml`。聊天意愿和分条发送可以这样调：
 
 ```toml
 [trigger]
-random_reply_probability = 0.05       # 0.00 ~ 1.00，越高越容易接话
+chat_willingness = 0.35          # 0.00 ~ 1.00，越高越常进入接话判断
+willingness_cooldown_seconds = 60
+decision_with_llm = true         # 由模型读空气决定最终要不要说
+decision_max_per_hour = 20
+decision_backoff_base_seconds = 15
+decision_backoff_cap_seconds = 300
+decision_backoff_start_count = 2
 
 [groups.overrides."群号"]
-random_reply_probability = 0.20
+chat_willingness = 0.20
+
+[reply]
+split_enabled = true             # 把长回复拆成几条短消息
+split_min_chars = 24
+split_max_chars = 45
+split_delay_ms = 450
+split_jitter_ms = 300
+max_segments = 4
 ```
 
-或在群里让管理员发送 `/ai random 0.20`。
+也可以在群里让管理员发送 `/ai willingness 0.20`。
 
 聊天记录 `hajimi.db` 也会被 `.gitignore` 忽略。机器人会保存聊天用于上下文和长期记忆
 （原始消息默认保留 30 天），发送 `/ai forget me` 可以删除自己的记忆。长期记忆、用户画像和
@@ -197,7 +213,7 @@ http://127.0.0.1:3133/
 可以实时看到：
 
 - 收到的群聊/私聊消息
-- 触发判断（@、唤醒词、随机接话的 roll 值、静音、限流）
+- 触发判断（@、唤醒词、聊天意愿的 roll 值、决策模型的 speak/reason/angle、静音、限流）
 - 本次注入的画像、边界、长期记忆、跨会话消息
 - 发给模型的完整 prompt
 - 模型返回、耗时、token

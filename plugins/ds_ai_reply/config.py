@@ -155,15 +155,20 @@ class TriggerConfig:
     private_mode: str
     group_mode: str
     wake_words: list[str]
-    random_reply_probability: float
-    random_reply_cooldown_seconds: int
+    chat_willingness: float
+    willingness_cooldown_seconds: int
+    decision_with_llm: bool
+    decision_max_per_hour: int
+    decision_backoff_base_seconds: int
+    decision_backoff_cap_seconds: int
+    decision_backoff_start_count: int
 
 
 @dataclass(frozen=True)
 class GroupOverride:
     enabled: bool | None = None
     trigger_mode: str | None = None
-    random_reply_probability: float | None = None
+    chat_willingness: float | None = None
     quiet_hours: list[str] = field(default_factory=list)
     persona_extra: str = ""
 
@@ -198,6 +203,11 @@ class ReplyConfig:
     group_max_chars: int
     private_max_chars: int
     random_max_chars: int
+    split_enabled: bool
+    split_min_chars: int
+    split_max_chars: int
+    split_delay_ms: int
+    split_jitter_ms: int
 
 
 @dataclass(frozen=True)
@@ -380,6 +390,9 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
             if not isinstance(raw, dict):
                 continue
             enabled = raw.get("enabled")
+            willingness_raw = raw.get(
+                "chat_willingness", raw.get("random_reply_probability")
+            )
             overrides[str(group_id)] = GroupOverride(
                 enabled=enabled if isinstance(enabled, bool) else None,
                 trigger_mode=(
@@ -387,9 +400,9 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
                     if _text(raw.get("trigger_mode")) in VALID_GROUP_MODES
                     else None
                 ),
-                random_reply_probability=(
-                    min(1.0, max(0.0, _float(raw.get("random_reply_probability"), 0.0)))
-                    if "random_reply_probability" in raw
+                chat_willingness=(
+                    min(1.0, max(0.0, _float(willingness_raw, 0.0)))
+                    if willingness_raw is not None
                     else None
                 ),
                 quiet_hours=_str_list(raw.get("quiet_hours")),
@@ -420,11 +433,41 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
             private_mode=private_mode,
             group_mode=group_mode,
             wake_words=_str_list(trigger.get("wake_words")),
-            random_reply_probability=min(
-                1.0, max(0.0, _float(trigger.get("random_reply_probability"), 0.0))
+            chat_willingness=min(
+                1.0,
+                max(
+                    0.0,
+                    _float(
+                        trigger.get(
+                            "chat_willingness",
+                            trigger.get("random_reply_probability", 0.35),
+                        ),
+                        0.35,
+                    ),
+                ),
             ),
-            random_reply_cooldown_seconds=max(
-                0, _int(trigger.get("random_reply_cooldown_seconds"), 60)
+            willingness_cooldown_seconds=max(
+                0,
+                _int(
+                    trigger.get(
+                        "willingness_cooldown_seconds",
+                        trigger.get("random_reply_cooldown_seconds", 60),
+                    ),
+                    60,
+                ),
+            ),
+            decision_with_llm=_bool(trigger.get("decision_with_llm"), True),
+            decision_max_per_hour=min(
+                1000, max(0, _int(trigger.get("decision_max_per_hour"), 20))
+            ),
+            decision_backoff_base_seconds=max(
+                0, _int(trigger.get("decision_backoff_base_seconds"), 15)
+            ),
+            decision_backoff_cap_seconds=max(
+                0, _int(trigger.get("decision_backoff_cap_seconds"), 300)
+            ),
+            decision_backoff_start_count=max(
+                1, _int(trigger.get("decision_backoff_start_count"), 2)
             ),
         ),
         groups=GroupsConfig(
@@ -461,6 +504,19 @@ def load_bot_config(path: Path = BOT_CONFIG_PATH) -> BotConfig:
             ),
             random_max_chars=min(
                 500, max(10, _int(reply.get("random_max_chars"), 80))
+            ),
+            split_enabled=_bool(reply.get("split_enabled"), True),
+            split_min_chars=min(
+                200, max(1, _int(reply.get("split_min_chars"), 24))
+            ),
+            split_max_chars=min(
+                500, max(10, _int(reply.get("split_max_chars"), 45))
+            ),
+            split_delay_ms=min(
+                5000, max(0, _int(reply.get("split_delay_ms"), 450))
+            ),
+            split_jitter_ms=min(
+                5000, max(0, _int(reply.get("split_jitter_ms"), 300))
             ),
         ),
         memory=MemoryConfig(

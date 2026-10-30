@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -130,6 +132,7 @@ async def generate_reply(
     config: BotConfig,
     ai_config: AIConfig,
     effective: EffectiveGroup,
+    decision_angle: str = "",
 ) -> ReplyResult:
     speaker = identity.user_id(event)
     group = identity.group_id(event)
@@ -147,12 +150,12 @@ async def generate_reply(
         )
         raise ReplyBlocked("今天的 AI 额度用完啦，明天再聊喵。")
 
-    if trigger_kind == "random":
+    if trigger_kind in {"random", "willing"}:
         if not rate_limiter.allow_random(
-            group, config, config.trigger.random_reply_cooldown_seconds
+            group, config, config.trigger.willingness_cooldown_seconds
         ):
             await trace.emit(
-                "decision", "随机接话被冷却或群限流拦截", **trace_ctx
+                "decision", "主动接话被冷却或群限流拦截", **trace_ctx
             )
             raise ReplyBlocked(silent=True)
     elif not rate_limiter.allow_direct(speaker, group, config):
@@ -259,6 +262,7 @@ async def generate_reply(
         recall=recall,
         meta_query=meta_query,
         image_data_urls=image_data_urls,
+        decision_angle=decision_angle,
     )
 
     await trace.emit(
@@ -271,6 +275,7 @@ async def generate_reply(
         **trace_ctx,
         detail={
             "trigger": trigger_kind,
+            "decision_angle": decision_angle,
             "recall": recall,
             "meta_query": meta_query,
             "images": len(image_data_urls),
@@ -383,7 +388,7 @@ async def generate_reply(
         config, result.prompt_tokens, result.completion_tokens, result.model
     )
 
-    if trigger_kind == "random":
+    if trigger_kind in {"random", "willing"}:
         max_chars = config.reply.random_max_chars
     elif group:
         max_chars = config.reply.group_max_chars
@@ -459,32 +464,95 @@ async def after_reply(
         logger.opt(exception=error).warning("ds_ai_reply 保存回复失败")
 
 
-def split_reply(text: str, max_chars: int, max_segments: int) -> list[str]:
-    """按段落拆分过长回复，最多 max_segments 条。"""
+_SENTENCE_END = re.compile(r"(?<=[。！？!?…~])")
+_LONG_PAUSE = re.compile(r"(?<=[，,、；;])")
+
+
+def _hard_split(text: str, max_chars: int) -> list[str]:
+    return [
+        text[index : index + max_chars]
+        for index in range(0, len(text), max_chars)
+        if text[index : index + max_chars].strip()
+    ]
+
+
+def _split_long_piece(piece: str, max_chars: int) -> list[str]:
+    if len(piece) <= max_chars:
+        return [piece]
+
+    parts: list[str] = []
+    current = ""
+    for chunk in _LONG_PAUSE.split(piece):
+        if not chunk:
+            continue
+        if len(current) + len(chunk) <= max_chars:
+            current += chunk
+            continue
+        if current:
+            parts.append(current)
+            current = ""
+        if len(chunk) > max_chars:
+            parts.extend(_hard_split(chunk, max_chars))
+        else:
+            current = chunk
+    if current:
+        parts.append(current)
+    return [part for part in parts if part.strip()]
+
+
+def split_reply(
+    text: str,
+    *,
+    enabled: bool,
+    min_chars: int,
+    max_chars: int,
+    max_segments: int,
+) -> list[str]:
+    """按句子/停顿拆成多条短消息，保留全部内容。"""
     text = text.strip()
     if not text:
         return []
-    if len(text) <= max_chars:
+    if not enabled or max_segments <= 1 or len(text) <= min_chars:
         return [text]
+
+    pieces: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        for sentence in _SENTENCE_END.split(line):
+            sentence = sentence.strip()
+            if sentence:
+                pieces.extend(_split_long_piece(sentence, max_chars))
+
+    total = sum(len(piece) for piece in pieces)
+    target_count = min(max_segments, max(1, math.ceil(total / max_chars)))
+    target = min(max_chars, max(1, math.ceil(total / target_count)))
 
     segments: list[str] = []
     current = ""
-    for paragraph in text.split("\n"):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        candidate = f"{current}\n{paragraph}".strip() if current else paragraph
-        if len(candidate) <= max_chars:
+    for piece in pieces:
+        candidate = f"{current}{piece}".strip() if current else piece
+        if len(candidate) <= target:
             current = candidate
             continue
         if current:
             segments.append(current)
-        while len(paragraph) > max_chars:
-            segments.append(paragraph[:max_chars])
-            paragraph = paragraph[max_chars:]
-        current = paragraph
-        if len(segments) >= max_segments:
-            break
-    if current and len(segments) < max_segments:
+        current = piece
+    if current:
         segments.append(current)
-    return segments[:max_segments]
+
+    if len(segments) > max_segments:
+        head = segments[: max_segments - 1]
+        tail = "".join(segments[max_segments - 1 :]).strip()
+        segments = head + ([tail] if tail else [])
+
+    if (
+        len(segments) > 1
+        and len(segments[-1]) < 8
+        and len(segments[-2]) + len(segments[-1]) <= max_chars
+    ):
+        segments[-2] += segments[-1]
+        segments.pop()
+
+    return [segment for segment in segments if segment.strip()]

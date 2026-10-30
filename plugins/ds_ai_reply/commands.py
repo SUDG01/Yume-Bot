@@ -40,7 +40,7 @@ HELP_TEXT = """—— AI 聊天管理 ——
 /ai status            查看当前群/会话状态
 /ai on | off          开启/关闭本群 AI（群管理）
 /ai trigger <模式>    mention / mention_or_wake / all（群管理）
-/ai random <0-1>      设置随机接话概率（群管理）
+/ai willingness <0-1> 设置聊天意愿（群管理，/ai random 同义）
 /ai clear             清空当前会话的短期上下文
 /ai memory me         查看我记得你什么（私聊）
 /ai forget me         删除我记得的关于你的内容
@@ -131,7 +131,7 @@ async def handle_ai(event: MessageEvent, args: Message = CommandArg()):
         await ai_cmd.finish(f"喵~ 本群触发方式已设为 {parts[1]}")
         return
 
-    if action == "random":
+    if action in {"random", "willingness"}:
         ok, message = await _require_manager(event)
         if not ok:
             await ai_cmd.finish(message)
@@ -144,12 +144,12 @@ async def handle_ai(event: MessageEvent, args: Message = CommandArg()):
         except ValueError:
             probability = -1
         if not 0 <= probability <= 1:
-            await ai_cmd.finish("用法：/ai random 0.05（范围 0.00 ~ 1.00）")
+            await ai_cmd.finish("用法：/ai willingness 0.35（范围 0.00 ~ 1.00）")
             return
         gid = group_id(event)
         await store.set_group_setting(gid, random_probability=probability)
         invalidate_effective(gid)
-        await ai_cmd.finish(f"喵~ 本群随机接话概率已设为 {probability:.2f}")
+        await ai_cmd.finish(f"喵~ 本群聊天意愿已设为 {probability:.2f}")
         return
 
     if action == "clear":
@@ -298,7 +298,8 @@ async def _status(event: MessageEvent) -> None:
             f"—— 本群 AI 状态 ——\n"
             f"状态：{enabled}\n"
             f"触发：{effective.trigger_mode}\n"
-            f"随机接话概率：{effective.random_reply_probability:.2f}\n"
+            f"聊天意愿：{effective.chat_willingness:.2f}"
+            f"（LLM 决策：{'开' if config.trigger.decision_with_llm else '关'}）\n"
             f"已记录消息：{stats.get('total', 0)} 条（最近 {last_at}）\n"
             f"跨会话上下文：{cross}，记忆混用：{mix}\n"
             f"我的记忆：{memory_count} 条\n"

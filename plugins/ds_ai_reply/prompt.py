@@ -74,6 +74,7 @@ def _stable_system(config: BotConfig, effective: EffectiveGroup) -> str:
         "  不能编造内容，直接说看不到就好。\n"
         "- 用户问过去的事时，优先查看下面的记忆和跨会话记录；没印象就说没印象，不要编。\n"
         "- 群聊通常回 1-2 句，像插话；私聊最多 3 句，除非对方明确要求详细说明。\n"
+        "- 可以像连发一样用很短的句子，但每条要能独立读懂，不要把一句话拆成两半。\n"
         f"- 单条回复总长度不超过 {config.persona.max_reply_chars} 字。"
     )
 
@@ -102,6 +103,7 @@ def _session_lines(
     recall_messages: list[dict[str, Any]],
     recall: bool = False,
     meta_query: bool = False,
+    decision_angle: str = "",
 ) -> list[str]:
     now = datetime.now(_tz(config.general.timezone)).strftime("%Y-%m-%d %H:%M")
     chat_type = f"群聊（群号 {group_id}）" if group_id else "私聊"
@@ -113,6 +115,8 @@ def _session_lines(
         reason = "对方在群里叫了你的名字。"
     elif trigger_kind == "random":
         reason = "这条群消息没有 @ 你，你决定自然地接一句话，不要显得刻意。"
+    elif trigger_kind == "willing":
+        reason = "你读完群聊，判断现在适合主动接一句话。"
     else:
         reason = "你正在参与这个群的聊天。"
 
@@ -125,8 +129,8 @@ def _session_lines(
         style_hint = (
             "私聊：可以多说两句，但不要分点或长篇解释；参考对方的说话长度。"
         )
-    if trigger_kind == "random":
-        style_hint = "随机接话：只回一句，别像客服。"
+    if trigger_kind in {"random", "willing"}:
+        style_hint = "主动接话：只回一句，别像客服。"
 
     lines = [
         "【当前会话】",
@@ -136,6 +140,8 @@ def _session_lines(
         f"回复方式：{style_hint}",
         f"当前发言者：{display_name}（QQ {speaker_qq}）",
     ]
+    if decision_angle:
+        lines.append(f"接话方向：{decision_angle}")
 
     if cross_messages:
         cross_lines: list[str] = []
@@ -282,6 +288,7 @@ def build_messages(
     recall: bool = False,
     meta_query: bool = False,
     image_data_urls: list[str] | None = None,
+    decision_angle: str = "",
 ) -> list[dict[str, Any]]:
     chars_per_token = ai_config.context.chars_per_token
     stable = _stable_system(config, effective)
@@ -299,6 +306,7 @@ def build_messages(
             recall_messages=recall_messages or [],
             recall=recall,
             meta_query=meta_query,
+            decision_angle=decision_angle,
         )
     )
 

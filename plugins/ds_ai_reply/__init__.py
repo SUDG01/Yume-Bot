@@ -1,7 +1,7 @@
 """ds_ai_reply：群聊/私聊 AI 回复 + 长期记忆。
 
 行为：
-- 群聊：@bot、唤醒词或按概率随机接话
+- 群聊：@bot、唤醒词，或按聊天意愿 + 模型决策主动接话
 - 私聊：按 private_mode 回复
 - 所有非命令消息作为上下文保存，长期记忆由后台任务异步抽取
 - 记忆跨群/私聊混用，但会标注来源；私聊内容不会主动在群里复述
@@ -9,13 +9,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 
 from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
 
 from . import commands as _commands  # noqa: F401  注册 /ai 命令
-from . import dashboard, identity, jobs, policy, service, trace
+from . import dashboard, decision, identity, jobs, policy, service, trace
 from .config import ConfigError, get_ai_config, get_bot_config
 from .policy import get_effective_group, in_quiet_hours, is_command
 from .memory import store
@@ -23,7 +24,7 @@ from .memory import store
 driver = get_driver()
 
 record_matcher = on_message(priority=1, block=False)
-random_matcher = on_message(priority=9, block=False)
+willing_matcher = on_message(priority=9, block=False)
 direct_matcher = on_message(priority=10, block=True)
 
 _ready = False
@@ -64,14 +65,14 @@ async def _startup() -> None:
         f"ds_ai_reply 已就绪：{ai_config.provider.model}",
         detail={
             "base_url": ai_config.provider.base_url,
-            "random_reply_probability": config.trigger.random_reply_probability,
+            "chat_willingness": config.trigger.chat_willingness,
             "dashboard": f"http://{config.dashboard.host}:{config.dashboard.port}/",
         },
     )
     logger.info(
         f"ds_ai_reply 已就绪：{ai_config.provider.model} @ "
         f"{ai_config.provider.base_url}；"
-        f"随机接话概率 {config.trigger.random_reply_probability:.2f}"
+        f"聊天意愿 {config.trigger.chat_willingness:.2f}"
     )
 
 
@@ -157,10 +158,28 @@ async def _deliver(
     quote: bool,
 ) -> None:
     segments = service.split_reply(
-        text, config.persona.max_reply_chars, config.reply.max_segments
+        text,
+        enabled=config.reply.split_enabled,
+        min_chars=config.reply.split_min_chars,
+        max_chars=config.reply.split_max_chars,
+        max_segments=config.reply.max_segments,
     )
     if not segments:
         return
+
+    delays = [
+        config.reply.split_delay_ms
+        + random.randint(0, config.reply.split_jitter_ms)
+        for _ in range(max(0, len(segments) - 1))
+    ]
+    if len(segments) > 1:
+        await trace.emit(
+            "reply_split",
+            f"回复拆成 {len(segments)} 条发送",
+            **_trace_ctx(event),
+            detail={"segments": segments, "delays_ms": delays},
+        )
+
     for index, segment in enumerate(segments):
         message = MessageSegment.text(segment)
         if index == 0 and quote and config.reply.quote:
@@ -169,6 +188,7 @@ async def _deliver(
             await matcher.finish(message)
         else:
             await matcher.send(message)
+            await asyncio.sleep(delays[index] / 1000)
 
 
 @record_matcher.handle()
@@ -227,8 +247,8 @@ async def _record(event: MessageEvent) -> None:
         )
 
 
-@random_matcher.handle()
-async def _random_reply(event: MessageEvent) -> None:
+@willing_matcher.handle()
+async def _willing_reply(event: MessageEvent) -> None:
     if not _ready or not identity.is_group(event):
         return
     text = _text(event)
@@ -252,33 +272,38 @@ async def _random_reply(event: MessageEvent) -> None:
     effective = await get_effective_group(identity.group_id(event), config)
     if not effective.enabled:
         await trace.emit(
-            "decision", "随机接话跳过：群 AI 已关闭", **_trace_ctx(event)
+            "decision", "主动接话跳过：群 AI 已关闭", **_trace_ctx(event)
         )
         return
     if _direct_trigger(event, text, effective, config) is not None:
         await trace.emit(
-            "decision", "随机接话跳过：该消息会直接触发", **_trace_ctx(event)
+            "decision", "主动接话跳过：该消息会直接触发", **_trace_ctx(event)
         )
         return
-    if effective.random_reply_probability <= 0:
+    if effective.chat_willingness <= 0:
         return
     if effective.quiet_hours and in_quiet_hours(
         effective.quiet_hours, config.general.timezone
     ):
         await trace.emit(
-            "decision", "随机接话跳过：静音时段", **_trace_ctx(event)
+            "decision", "主动接话跳过：静音时段", **_trace_ctx(event)
         )
+        return
+    group = identity.group_id(event)
+    if config.trigger.decision_with_llm and not policy.decision_limiter.ready(
+        group
+    ):
         return
 
     roll = random.random()
-    hit = roll < effective.random_reply_probability
+    hit = roll < effective.chat_willingness
     await trace.emit(
         "decision",
-        f"随机接话判定：p={effective.random_reply_probability:.2f} "
-        f"roll={roll:.3f} → {'接话' if hit else '不接'}",
+        f"聊天意愿：w={effective.chat_willingness:.2f} "
+        f"roll={roll:.3f} → {'进入判断' if hit else '不接'}",
         **_trace_ctx(event),
         detail={
-            "probability": effective.random_reply_probability,
+            "willingness": effective.chat_willingness,
             "roll": round(roll, 4),
             "hit": hit,
         },
@@ -288,18 +313,6 @@ async def _random_reply(event: MessageEvent) -> None:
 
     try:
         ai_config = get_ai_config()
-        result = await service.generate_reply(
-            event,
-            text,
-            "random",
-            config=config,
-            ai_config=ai_config,
-            effective=effective,
-        )
-    except service.ReplyBlocked as blocked:
-        if not blocked.silent and blocked.message:
-            await random_matcher.send(MessageSegment.text(blocked.message))
-        return
     except ConfigError as error:
         await trace.emit(
             "error",
@@ -309,8 +322,92 @@ async def _random_reply(event: MessageEvent) -> None:
         )
         return
 
+    decision_angle = ""
+    if config.trigger.decision_with_llm:
+        if not policy.decision_limiter.allow(
+            group, config.trigger.decision_max_per_hour
+        ):
+            await trace.emit(
+                "decision",
+                "意愿决策达到每小时上限，跳过",
+                **_trace_ctx(event),
+            )
+            return
+
+        try:
+            recent = await store.get_recent_messages(
+                identity.session_id(event), 8
+            )
+            verdict = await decision.decide_willingness(
+                config=config,
+                ai_config=ai_config,
+                display_name=await identity.display_name(event),
+                current_text=text,
+                recent_messages=recent,
+            )
+        except Exception as error:
+            logger.opt(exception=error).warning("ds_ai_reply 意愿决策失败")
+            await trace.emit(
+                "error",
+                f"意愿决策失败：{type(error).__name__}",
+                **_trace_ctx(event),
+                detail={"error": str(error)},
+            )
+            return
+
+        await policy.token_budget.add(
+            config,
+            verdict.prompt_tokens,
+            verdict.completion_tokens,
+            verdict.model or "decision",
+        )
+        await trace.emit(
+            "willingness",
+            f"意愿决策：{'接话' if verdict.speak else '不接'}",
+            **_trace_ctx(event),
+            detail={
+                "speak": verdict.speak,
+                "reason": verdict.reason,
+                "angle": verdict.angle,
+                "model": verdict.model,
+                "prompt_tokens": verdict.prompt_tokens,
+                "completion_tokens": verdict.completion_tokens,
+            },
+        )
+        if not verdict.speak:
+            policy.decision_limiter.note_no_action(
+                group,
+                config.trigger.decision_backoff_base_seconds,
+                config.trigger.decision_backoff_cap_seconds,
+                config.trigger.decision_backoff_start_count,
+            )
+            return
+        policy.decision_limiter.note_action(group)
+        decision_angle = verdict.angle
+    else:
+        await trace.emit(
+            "willingness",
+            "未启用 LLM 决策，按聊天意愿直接接话",
+            **_trace_ctx(event),
+        )
+
+    try:
+        result = await service.generate_reply(
+            event,
+            text,
+            "willing",
+            config=config,
+            ai_config=ai_config,
+            effective=effective,
+            decision_angle=decision_angle,
+        )
+    except service.ReplyBlocked as blocked:
+        if not blocked.silent and blocked.message:
+            await willing_matcher.send(MessageSegment.text(blocked.message))
+        return
+
     await service.after_reply(event, result, config)
-    await _deliver(random_matcher, event, result.text, config, quote=False)
+    await _deliver(willing_matcher, event, result.text, config, quote=False)
 
 
 @direct_matcher.handle()

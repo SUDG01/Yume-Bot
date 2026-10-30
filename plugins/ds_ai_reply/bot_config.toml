@@ -27,10 +27,18 @@ private_mode = "always"
 # group_mode: mention（仅 @）/ mention_or_wake（@ 或叫名字）/ all（每条都回）
 group_mode = "mention"
 wake_words = ["小Yume", "yume"]
-# 随机接话概率，0.00 ~ 1.00，越高越容易接话
-random_reply_probability = 0.0
-# 两次随机接话之间的最短间隔（秒），防止刷屏；设为 0 则只受每分钟限流约束
-random_reply_cooldown_seconds = 60
+# 聊天意愿，0.00 ~ 1.00：越高越常进入“要不要接话”的判断
+chat_willingness = 0.35
+# 两次主动接话之间的最短间隔（秒），防止刷屏
+willingness_cooldown_seconds = 60
+# true：由模型读空气决定最终要不要接话；false：按意愿概率直接接话
+decision_with_llm = true
+# 每个群每小时最多调用多少次“要不要接话”的决策模型；0 = 不限制
+decision_max_per_hour = 20
+# 连续决定不说话后的退避：第 N 次起等待 base*2^(N-start) 秒，最长 cap 秒
+decision_backoff_base_seconds = 15
+decision_backoff_cap_seconds = 300
+decision_backoff_start_count = 2
 
 [groups]
 mode = "all"                      # all / whitelist / blacklist
@@ -41,7 +49,7 @@ blacklist = []
 [groups.overrides."123456789"]
 enabled = true
 trigger_mode = "mention"
-random_reply_probability = 0.05
+chat_willingness = 0.05
 quiet_hours = ["23:30", "07:30"]
 persona_extra = "这个群喜欢用缩写，可以跟着用，但不要过度。"
 
@@ -58,12 +66,18 @@ daily_token_budget = 2000000
 
 [reply]
 quote = true
-max_segments = 3
+max_segments = 4
 # 不同场景的单条长度上限；persona.max_reply_chars 是总上限
 group_max_chars = 150
 private_max_chars = 300
-# 随机接话再短一点，更像群友插话
+# 主动接话再短一点，更像群友插话
 random_max_chars = 80
+# 把回复拆成几条短消息发送，更像真人连发
+split_enabled = true
+split_min_chars = 24        # 短于这个长度不拆
+split_max_chars = 45        # 每条最多多少字
+split_delay_ms = 450        # 两条之间的基础间隔
+split_jitter_ms = 300       # 随机抖动，避免机械感
 
 [memory]
 enabled = true

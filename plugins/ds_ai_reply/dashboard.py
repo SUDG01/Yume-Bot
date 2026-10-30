@@ -160,6 +160,8 @@ DASHBOARD_HTML = """<!doctype html>
   .event[data-kind="llm_request"] .badge { background: var(--orange); }
   .event[data-kind="llm_response"] .badge { background: var(--aqua); }
   .event[data-kind="reply"] .badge { background: var(--green); }
+  .event[data-kind="willingness"] .badge { background: var(--violet); }
+  .event[data-kind="reply_split"] .badge { background: var(--aqua); }
   .event[data-kind="memory_extract"] .badge { background: var(--magenta); }
   .event[data-kind="command"] .badge { background: var(--violet); }
   .event[data-kind="error"] .badge { background: var(--red); }
@@ -190,6 +192,8 @@ DASHBOARD_HTML = """<!doctype html>
     <option value="llm_request">模型请求</option>
     <option value="llm_response">模型返回</option>
     <option value="reply">回复</option>
+    <option value="willingness">意愿判断</option>
+    <option value="reply_split">分条发送</option>
     <option value="memory_extract">记忆抽取</option>
     <option value="command">命令</option>
     <option value="error">错误</option>
@@ -204,6 +208,7 @@ DASHBOARD_HTML = """<!doctype html>
 const KINDS = {
   message: "消息", decision: "判断", context: "上下文",
   llm_request: "模型请求", llm_response: "模型返回", reply: "回复",
+  willingness: "意愿判断", reply_split: "分条发送",
   memory_extract: "记忆抽取", command: "命令", error: "错误", system: "系统"
 };
 const token = new URLSearchParams(location.search).get("token") || "";

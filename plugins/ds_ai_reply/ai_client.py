@@ -112,7 +112,9 @@ async def request_reply(
 
 
 async def request_json(
-    messages: list[dict[str, Any]], config: AIConfig | None = None
+    messages: list[dict[str, Any]],
+    config: AIConfig | None = None,
+    max_tokens: int | None = None,
 ) -> AIResult:
     config = config or get_ai_config()
     memory = config.memory_llm
@@ -120,7 +122,7 @@ async def request_json(
         model=memory.model,
         messages=messages,  # type: ignore[arg-type]
         temperature=memory.temperature,
-        max_tokens=memory.max_tokens,
+        max_tokens=max_tokens or memory.max_tokens,
     )
     content = (response.choices[0].message.content or "").strip()
     if not content:

@@ -36,8 +36,10 @@
 - 跨会话原文：私聊能看到该用户最近在群里的发言；群聊能看到他在其他群的发言
   （私聊原文默认不进群，避免泄露）
 - 自然表达：`behavior_style` / `reply_style` 独立配置；群聊 1-2 句、私聊最多 3 句；
-  随机接话单独限长，禁止列表/编号/动作描写/客服腔
-- 群聊随机接话：`random_reply_probability = 0.00 ~ 1.00`，带冷却和群覆盖
+  长回复按句子拆成几条短消息，带随机发送间隔
+- 聊天意愿：`chat_willingness = 0.00 ~ 1.00` 决定多常进入判断；再由模型读空气
+  输出 `speak/reason/angle`，决定最终要不要接话（参考 MaiBot 的 Planner 思路）
+- 主动接话单独限长，禁止列表/编号/动作描写/客服腔
 - 本地观测台：`http://127.0.0.1:3133/`，实时查看消息、触发判断、上下文、完整 prompt、
   模型回复、耗时/token、记忆抽取和错误；只监听本机，事件默认保留 7 天
 - 记忆增强：回忆模式（扩大长期记忆 + 按关键词搜索 30 天聊天记录）、记忆时间戳、
@@ -459,25 +461,33 @@ access_score = min(1, log1p(access_count) / 3)
 | 私聊 | 每条消息都回复 | `trigger.private_mode = always / whitelist / off` |
 | 群聊 | 仅 @bot 时回复 | `group_mode = mention / mention_or_wake / all` |
 | 唤醒词 | 关闭，叫了名字也会回 | `wake_words = ["小Yume", "yume"]` |
-| 随机接话 | 默认关闭；概率越高越容易接话 | `random_reply_probability = 0.00 ~ 1.00` |
-| 随机冷却 | 两次随机接话至少间隔 60 秒 | `random_reply_cooldown_seconds` |
-| 群覆盖 | 可按群单独设置开关/触发/概率/静音时段 | `[groups.overrides."群号"]` + `/ai random` |
+| 主动接话 | 默认关闭；意愿越高越常进入判断 | `chat_willingness = 0.00 ~ 1.00` |
+| 意愿决策 | 模型读空气决定最终要不要说 | `decision_with_llm = true`、`decision_max_per_hour` |
+| 接话冷却 | 两次主动接话至少间隔 60 秒 | `willingness_cooldown_seconds` |
+| 群覆盖 | 可按群单独设置开关/触发/意愿/静音时段 | `[groups.overrides."群号"]` + `/ai willingness` |
 | 命令消息 | 不记录、不回复 | `COMMAND_START` 前缀 |
 | 回复 bot 的消息 / 连续对话窗口 | 未实现（后续） | — |
 | 其他 bot 的消息 | 只能识别自己，暂不区分其他 bot | — |
 
-> 随机接话只作用于"本来不会直接回复"的群消息；已经 @bot 或命中唤醒词的消息由直接回复处理。
-> 静音时段内不随机接话，@bot 仍然会回。随机接话也受限流和冷却约束。
+> 主动接话只作用于"本来不会直接回复"的群消息；已经 @bot 或命中唤醒词的消息由直接回复处理。
+> 静音时段内不主动接话，@bot 仍然会回。主动接话也受限流和冷却约束。
+>
+> 聊天意愿是"注意力门槛"：先按意愿决定要不要进入判断，再由决策模型结合最近聊天
+> 决定 `speak=true/false`。这样不是固定概率硬回，而是能读空气、选择闭嘴。
+> 决策模型返回 JSON：`{"speak": bool, "reason": "...", "angle": "..."}`。
+> 连续决定不说话后按 `decision_backoff_*` 指数退避，避免一直调用模型；决定说话则重置。
 
 ### 7.2 回复策略
 
-- 默认引用触发消息（`quote = true`），便于群里看清上下文；随机接话不引用。
-- 单条回复上限 300 字（`persona.max_reply_chars`），随机接话上限 80 字
-  （`reply.random_max_chars`）；超长按段落拆成最多 3 条。
+- 默认引用触发消息（`quote = true`），便于群里看清上下文；主动接话不引用。
+- 单条回复上限 300 字（`persona.max_reply_chars`），主动接话上限 80 字
+  （`reply.random_max_chars`）。
+- 分条发送：`reply.split_enabled`，按句子/停顿拆成最多 `max_segments` 条，
+  每条尽量不超过 `split_max_chars`，条间随机等待 `split_delay_ms + jitter`。
 - `behavior_style` 管"什么时候开口、要不要接话"，`reply_style` 管"怎么说话"；
   默认要求短句、口语化、不用列表/编号/动作描写、不解释系统。
 - 模型输出统一走 `MessageSegment.text()`，杜绝 CQ 码注入。
-- 空回复不发送。（重复回复检查、打字延迟为后续项。）
+- 空回复不发送。
 
 > 风格分层参考了 [MaiBot](https://github.com/Mai-with-u/MaiBot) 的
 > `behavior_style` / `reply_style` / 群聊提示词思路（只借鉴设计，未复制代码）。
@@ -921,9 +931,15 @@ max_reply_chars = 300
 private_mode = "always"          # always / whitelist（仅 bot 管理员）/ off
 group_mode = "mention"           # mention / mention_or_wake / all
 wake_words = ["小Yume", "yume"]
-# 随机接话概率 0.00 ~ 1.00，越高越容易接话
-random_reply_probability = 0.0
-random_reply_cooldown_seconds = 60
+# 聊天意愿 0.00 ~ 1.00，越高越常进入“要不要接话”的判断
+chat_willingness = 0.35
+willingness_cooldown_seconds = 60
+# 由模型读空气决定最终要不要接话
+decision_with_llm = true
+decision_max_per_hour = 20
+decision_backoff_base_seconds = 15
+decision_backoff_cap_seconds = 300
+decision_backoff_start_count = 2
 
 [groups]
 mode = "all"                     # all / whitelist / blacklist
@@ -933,7 +949,7 @@ blacklist = []
 [groups.overrides."123456789"]
 enabled = true
 trigger_mode = "mention"
-random_reply_probability = 0.05
+chat_willingness = 0.05
 quiet_hours = ["23:30", "07:30"]
 persona_extra = "这个群喜欢用缩写，可以跟着用，但不要过度。"
 
@@ -950,10 +966,15 @@ daily_token_budget = 2000000
 
 [reply]
 quote = true
-max_segments = 3
+max_segments = 4
 group_max_chars = 150
 private_max_chars = 300
 random_max_chars = 80
+split_enabled = true
+split_min_chars = 24
+split_max_chars = 45
+split_delay_ms = 450
+split_jitter_ms = 300
 
 [memory]
 enabled = true
@@ -993,7 +1014,8 @@ show_prompt = true       # 是否保存完整 prompt
 
 ```
 plugins/ds_ai_reply/
-├── __init__.py          # 事件入口、matcher、启动/关闭钩子、随机接话判定
+├── __init__.py          # 事件入口、matcher、启动/关闭钩子、主动接话判定
+├── decision.py          # 聊天意愿决策（speak/reason/angle）
 ├── config.py            # 双配置加载、校验、bot_config 热重载
 ├── ai_client.py         # 主对话 / 记忆抽取两个客户端
 ├── identity.py          # QQ、别名、群名片、会话 ID
@@ -1031,7 +1053,7 @@ plugins/ds_ai_reply/
 - 迁移到新 schema（users / aliases / messages / sessions）
 - 实现身份合并、展示名选择
 - 实现群开关、限流、冷却、管理命令
-- 群聊随机接话概率与冷却
+- 群聊聊天意愿 + LLM 决策 + 回复分条
 - 保留现有"最近 N 条"行为
 
 **验收**：重启后同一会话上下文不丢；改名后称呼正确；`/ai off` 后群内不再回复；限流生效；配置写错时 bot 仍能启动并提示。

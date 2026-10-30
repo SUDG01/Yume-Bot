@@ -18,8 +18,13 @@ max_reply_chars = 300
 private_mode = "always"
 group_mode = "mention"
 wake_words = ["狐雪月", "雪月"]
-random_reply_probability = 0.0
-random_reply_cooldown_seconds = 60
+chat_willingness = 0.35
+willingness_cooldown_seconds = 60
+decision_with_llm = true
+decision_max_per_hour = 20
+decision_backoff_base_seconds = 15
+decision_backoff_cap_seconds = 300
+decision_backoff_start_count = 2
 
 [permissions]
 bot_admins = ["3132515343"]
@@ -34,10 +39,15 @@ daily_token_budget = 2000000
 
 [reply]
 quote = true
-max_segments = 3
+max_segments = 4
 group_max_chars = 150
 private_max_chars = 300
 random_max_chars = 80
+split_enabled = true
+split_min_chars = 24
+split_max_chars = 45
+split_delay_ms = 450
+split_jitter_ms = 300
 
 [memory]
 enabled = true
@@ -66,6 +76,6 @@ show_prompt = true
 # [groups.overrides."123456789"]
 # enabled = true
 # trigger_mode = "mention"
-# random_reply_probability = 0.05
+# chat_willingness = 0.05
 # quiet_hours = ["23:30", "07:30"]
 # persona_extra = "这个群喜欢用缩写。"
